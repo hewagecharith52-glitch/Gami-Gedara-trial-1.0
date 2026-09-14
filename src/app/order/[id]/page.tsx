@@ -97,8 +97,9 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
   const [isConnected, setIsConnected] = useState(false);
   const [showGame, setShowGame] = useState(true);
 
-  // Review Modal State for Tracking Page
+  // Review Modal & Submission Lock State
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [foodRating, setFoodRating] = useState(5);
   const [serviceRating, setServiceRating] = useState(5);
   const [waiterName, setWaiterName] = useState("");
@@ -225,14 +226,12 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
         showToast("Failed to submit review: " + error.message, "error");
       } else {
         setIsReviewModalOpen(false);
-        setReviewComment("");
-        setWaiterName("");
-        setReviewerName("");
+        setReviewSubmitted(true); // Lock the screen permanently to Thank You view
         showToast("Thank you! Your feedback has been received.", "success");
         confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.7 }
+          particleCount: 100,
+          spread: 80,
+          origin: { y: 0.6 }
         });
       }
     } catch (err: any) {
@@ -344,6 +343,25 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
           <h2 className="text-xl font-bold text-slate-900 mb-2">Order Not Found</h2>
           <p className="text-slate-500 text-sm mb-6">We couldn't locate your order details.</p>
           <Link href="/menu" className="block w-full bg-slate-900 text-white font-bold py-3 rounded-xl">Return to Menu</Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Review Submitted & Locked Final View
+  if (reviewSubmitted) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500 font-sans">
+        <div className="w-24 h-24 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-xl shadow-emerald-500/20 ring-8 ring-emerald-50">
+          <CheckCircle className="w-12 h-12 animate-bounce" />
+        </div>
+        <h2 className="text-3xl font-black text-slate-900 mb-2">Thank You! 🎉</h2>
+        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6 leading-relaxed">
+          Your feedback has been successfully received. We hope you enjoyed your dining experience at Table {order?.table_no ? order.table_no.padStart(2, "0") : ""}!
+        </p>
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500 space-y-2">
+          <p className="font-bold text-slate-700">Dining Session Closed</p>
+          <p>You can now safely close this window or leave the table. Have a wonderful day!</p>
         </div>
       </div>
     );
@@ -708,19 +726,19 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
             className="w-full flex items-center justify-between p-4 hover:bg-white/50 transition-colors rounded-2xl"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 shadow-inner">
+              <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 shadow-inner shrink-0">
                 <Gamepad2 className="w-5 h-5 animate-bounce" style={{ animationDuration: '1.5s' }} />
               </div>
-              <div className="text-left">
-                <h3 className="font-bold text-slate-900 leading-tight flex items-center gap-2">
-                  Play While You Wait 🎮
-                  <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-full animate-pulse shadow-sm shadow-indigo-500/30">🔥 Play & Chill</span>
-                </h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">Kill the waiting time! Tap to smash bricks 🕹️</p>
+              <div className="text-left min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-tight">Play While You Wait</h3>
+                  <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-full animate-pulse shadow-sm shadow-indigo-500/30 whitespace-nowrap">🔥 Play & Chill</span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-0.5 truncate">Tap to smash bricks & kill waiting time</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {!showGame && <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest bg-indigo-100 px-2 py-1 rounded-lg">Tap to Play</span>}
+            <div className="flex items-center gap-2 shrink-0 pl-2">
+              {!showGame && <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest bg-indigo-100 px-2 py-1 rounded-lg">Open</span>}
               {showGame ? <ChevronUp className="w-5 h-5 text-indigo-400" /> : <ChevronDown className="w-5 h-5 text-indigo-400" />}
             </div>
           </button>
