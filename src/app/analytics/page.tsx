@@ -602,7 +602,7 @@ export default function AnalyticsPage() {
               <div className="relative flex items-center justify-center w-32 h-32 overflow-hidden">
                 <div className="absolute w-28 h-28 rounded-full bg-emerald-100 animate-ping opacity-40" />
                 <div className="w-24 h-24 rounded-full bg-emerald-500 flex items-center justify-center shadow-xl shadow-emerald-500/40 relative">
-                  <svg className="w-12 h-12 text-white" viewBox="0 0 52 52" fill="none">
+                  <svg className="w-12 h-12 text-white" viewBox="0 52 52" fill="none">
                     <style>{`
                       @keyframes draw-check {
                         to { stroke-dashoffset: 0; }
@@ -1135,24 +1135,24 @@ export default function AnalyticsPage() {
               <div className="w-full h-[260px] sm:h-[360px] mt-4">
                 {isMounted ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourlyData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
+                    <BarChart data={hourlyData} margin={{ top: 20, right: 20, left: 10, bottom: 15 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
                         dataKey="label"
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }}
-                        dy={10}
-                        minTickGap={20}
+                        tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                        dy={8}
+                        interval={1}
                       />
                       <YAxis
                         axisLine={false}
                         tickLine={false}
-                        width={50}
+                        width={65}
                         domain={[0, 'auto']}
-                        tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                        tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }}
                         tickFormatter={(val) => {
-                          if (val === 0) return `${settings?.currency || 'Rs.'}0`;
+                          if (val === 0) return `0`;
                           if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
                           if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
                           return String(val);

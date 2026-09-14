@@ -7,7 +7,7 @@ import MenuItemCard, { MenuItem as CardMenuItem } from "@/components/MenuItemCar
 import {
   Search, ShoppingBag, Plus, Minus, Clock,
   CheckCircle, UtensilsCrossed, X, Star, AlertCircle, ChefHat,
-  Lock
+  Lock, AlertTriangle
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import confetti from "canvas-confetti";
@@ -26,23 +26,28 @@ type CartItem = {
   cartItemId: string;
 };
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 Minutes
 
 function MenuContent() {
   const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
   const urlTableNumber = searchParams.get("table");
+  const urlMode = searchParams.get("mode"); // e.g. mode=tablet to bypass locks
 
-  const [tableNumber, setTableNumber] = useState("1");
+  const [tableNumber, setTableNumber] = useState("");
   const [isTableSelectorOpen, setIsTableSelectorOpen] = useState(false);
 
-  // Security Session State (30-min timer + Bill Settlement lock)
+  // Security Session State
   const [isSessionExpired, setIsSessionExpired] = useState(false);
   const [isBillSettled, setIsBillSettled] = useState(false);
   const [sessionExpiryReason, setSessionExpiryReason] = useState("");
+  const [noQrDetected, setNoQrDetected] = useState(false);
 
   const { isAuthenticated } = useAuth();
   const { settings } = useSettings();
+
+  // Is this an in-house restaurant tablet or staff member?
+  const isBypassMode = Boolean(isAuthenticated || urlMode === "tablet");
 
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -66,56 +71,121 @@ function MenuContent() {
 
   const [dbMenu, setDbMenu] = useState<any[]>([]);
 
-  // 1. Client Mount Check
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 2. Table & Session Tracking
+  // 1. Session Evaluation with Refresh-Persistence Protection
   useEffect(() => {
     if (!mounted) return;
 
-    const activeTable = urlTableNumber || localStorage.getItem("active_table") || "1";
-    setTableNumber(activeTable);
-
-    if (urlTableNumber) {
-      localStorage.setItem("active_table", urlTableNumber);
-      sessionStorage.setItem(`session_start_${activeTable}`, Date.now().toString());
+    // Staff or In-house Tablet bypasses all expiry checks
+    if (isBypassMode) {
+      const activeTable = urlTableNumber || localStorage.getItem("active_table") || "1";
+      setTableNumber(activeTable);
+      return;
     }
 
-    const storedStart = sessionStorage.getItem(`session_start_${activeTable}`);
-    if (storedStart) {
-      const elapsed = Date.now() - parseInt(storedStart, 10);
-      if (elapsed > SESSION_TIMEOUT_MS) {
-        setIsSessionExpired(true);
-        setSessionExpiryReason("Your 30-minute dining session has expired. Please scan the table QR code again.");
+    const activeTable = urlTableNumber || localStorage.getItem("active_table");
+
+    if (!activeTable) {
+      setNoQrDetected(true);
+      return;
+    }
+
+    setTableNumber(activeTable);
+    localStorage.setItem("active_table", activeTable);
+
+    const lockKey = `pos_table_lock_${activeTable}`;
+    const sessionKey = `pos_table_session_${activeTable}`;
+
+    // Check if table was permanently locked (Settled or Expired)
+    const isLocked = localStorage.getItem(lockKey);
+    if (isLocked === "SETTLED") {
+      setIsBillSettled(true);
+      return;
+    } else if (isLocked === "EXPIRED") {
+      setIsSessionExpired(true);
+      setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
+      return;
+    }
+
+    // Evaluate time session
+    const storedSession = localStorage.getItem(sessionKey);
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        const elapsed = Date.now() - parsed.startTime;
+        if (elapsed > SESSION_TIMEOUT_MS) {
+          setIsSessionExpired(true);
+          localStorage.setItem(lockKey, "EXPIRED");
+          setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
+        }
+      } catch (e) {
+        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now() }));
       }
     } else {
-      sessionStorage.setItem(`session_start_${activeTable}`, Date.now().toString());
+      localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now() }));
     }
-  }, [mounted, urlTableNumber]);
+  }, [mounted, urlTableNumber, isBypassMode]);
 
-  // 3. Realtime Bill Settlement Lock
+  // 2. Initial Database Verification for Active vs Settled
   useEffect(() => {
-    if (!mounted || !tableNumber) return;
+    if (!mounted || !tableNumber || isBypassMode) return;
 
+    const verifyTableStatus = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("orders")
+          .select("id, status, created_at")
+          .eq("table_no", tableNumber)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          const latestOrder = data[0];
+          const status = String(latestOrder.status).toLowerCase();
+
+          // If the order is already completed, check if customer was part of it
+          if (status === "completed") {
+            const lockKey = `pos_table_lock_${tableNumber}`;
+            if (localStorage.getItem(lockKey) === "SETTLED") {
+              setIsBillSettled(true);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Table verification error", e);
+      }
+    };
+
+    verifyTableStatus();
+  }, [mounted, tableNumber, isBypassMode]);
+
+  // 3. Realtime Bill Settlement Listener
+  useEffect(() => {
+    if (!mounted || !tableNumber || isBypassMode) return;
+
+    const channelName = `customer_menu_settlement_${tableNumber}_${Date.now()}`;
     const channel = supabase
-      .channel(`table_settlement_sync_${tableNumber}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
-          table: "orders",
-          filter: `table_no=eq.${tableNumber}`
+          table: "orders"
         },
         (payload) => {
           const updatedOrder = payload.new as any;
-          if (updatedOrder && updatedOrder.status?.toLowerCase() === "completed") {
-            setIsBillSettled(true);
-            setIsCartOpen(false);
-            setCart([]);
-            sessionStorage.removeItem(`session_start_${tableNumber}`);
+          if (String(updatedOrder.table_no) === String(tableNumber)) {
+            const status = String(updatedOrder.status || "").toLowerCase();
+            if (status === "completed") {
+              setIsBillSettled(true);
+              setIsCartOpen(false);
+              setCart([]);
+              localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
+            }
           }
         }
       )
@@ -124,39 +194,39 @@ function MenuContent() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [mounted, tableNumber]);
+  }, [mounted, tableNumber, isBypassMode]);
 
-  // 4. Session Interval Check
+  // 4. Periodic 30-Min Expiry Check
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !tableNumber || isBypassMode) return;
 
-    const timer = setInterval(() => {
-      const storedStart = sessionStorage.getItem(`session_start_${tableNumber}`);
-      if (storedStart) {
-        const elapsed = Date.now() - parseInt(storedStart, 10);
-        if (elapsed > SESSION_TIMEOUT_MS && !isSessionExpired) {
-          setIsSessionExpired(true);
-          setIsCartOpen(false);
-          setCart([]);
-          setSessionExpiryReason("Your 30-minute dining session has expired. Please scan the table QR code again.");
-        }
+    const interval = setInterval(() => {
+      const sessionKey = `pos_table_session_${tableNumber}`;
+      const lockKey = `pos_table_lock_${tableNumber}`;
+      const stored = localStorage.getItem(sessionKey);
+
+      if (stored && localStorage.getItem(lockKey) !== "EXPIRED") {
+        try {
+          const parsed = JSON.parse(stored);
+          const elapsed = Date.now() - parsed.startTime;
+          if (elapsed > SESSION_TIMEOUT_MS) {
+            setIsSessionExpired(true);
+            setIsCartOpen(false);
+            setCart([]);
+            localStorage.setItem(lockKey, "EXPIRED");
+            setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
+          }
+        } catch (e) { }
       }
-    }, 15000);
+    }, 10000);
 
-    return () => clearInterval(timer);
-  }, [mounted, tableNumber, isSessionExpired]);
+    return () => clearInterval(interval);
+  }, [mounted, tableNumber, isBypassMode]);
 
-  // 5. Fetch Menu Data
+  // 5. Fetch Menu Items
   useEffect(() => {
     if (!mounted) return;
     let isMounted = true;
-
-    const cachedMenu = sessionStorage.getItem("cached_menu_data");
-    if (cachedMenu) {
-      try {
-        setDbMenu(JSON.parse(cachedMenu));
-      } catch (e) { }
-    }
 
     const fetchMenu = async () => {
       try {
@@ -169,17 +239,16 @@ function MenuContent() {
 
         if (isMounted && data) {
           setDbMenu(data);
-          sessionStorage.setItem("cached_menu_data", JSON.stringify(data));
         }
       } catch (err) {
-        if (isMounted && !cachedMenu) setDbMenu([]);
+        if (isMounted) setDbMenu([]);
       }
     };
 
     fetchMenu();
 
     const channel = supabase
-      .channel("public:menu_items:menu_opt")
+      .channel("public:menu_items:menu_cache_live")
       .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
         fetchMenu();
       })
@@ -192,7 +261,11 @@ function MenuContent() {
   }, [mounted]);
 
   // Modal scroll lock
-  const isAnyModalOpen = Boolean(isCartOpen || isReviewModalOpen || isTableSelectorOpen || isSessionExpired || isBillSettled);
+  const isAnyModalOpen = Boolean(
+    isCartOpen || isReviewModalOpen || isTableSelectorOpen ||
+    (!isBypassMode && (isSessionExpired || isBillSettled || noQrDetected))
+  );
+
   useEffect(() => {
     if (!mounted) return;
     if (isAnyModalOpen) {
@@ -290,7 +363,7 @@ function MenuContent() {
   }, [groupedMenu, activeCategory, searchQuery]);
 
   const handleAddCardToCart = (item: CardMenuItem, selectedSize: "Regular" | "Large", finalPrice: number) => {
-    if (isSessionExpired || isBillSettled) {
+    if (!isBypassMode && (isSessionExpired || isBillSettled)) {
       showToast("Session closed. Please scan table QR to order.", "error");
       return;
     }
@@ -336,7 +409,7 @@ function MenuContent() {
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
 
   const placeOrder = async () => {
-    if (isSessionExpired || isBillSettled) {
+    if (!isBypassMode && (isSessionExpired || isBillSettled)) {
       showToast("Session closed. Please scan table QR to order.", "error");
       return;
     }
@@ -604,7 +677,7 @@ function MenuContent() {
     );
   };
 
-  // Prevent SSR Text Hydration Mismatch completely
+  // Initial SSR Guard
   if (!mounted) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans">
@@ -616,8 +689,23 @@ function MenuContent() {
     );
   }
 
-  // Bill Settlement Finished Overlay
-  if (isBillSettled) {
+  // 1. Direct web visit without QR code (for guests)
+  if (!isBypassMode && noQrDetected) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-20 h-20 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-6 shadow-lg shadow-rose-500/20">
+          <AlertTriangle className="w-10 h-10" />
+        </div>
+        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Table QR Required</h2>
+        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
+          Please scan the QR code placed on your dining table to browse our live menu and order food.
+        </p>
+      </div>
+    );
+  }
+
+  // 2. Bill Settled View (Persistent across reloads)
+  if (!isBypassMode && isBillSettled) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-lg shadow-emerald-500/20">
@@ -625,11 +713,11 @@ function MenuContent() {
         </div>
         <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Bill Settled!</h2>
         <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
-          Thank you for dining with us at Table {tableNumber.padStart(2, "0")}! This dining session is now complete.
+          Thank you for dining with us at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}! Your dining session is now closed.
         </p>
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500 space-y-2">
-          <p className="font-bold text-slate-700">Need to place a new order?</p>
-          <p>Please scan the table QR code again to start a new dining session.</p>
+          <p className="font-bold text-slate-700">Need to place another order?</p>
+          <p>Please re-scan the table QR code to start a new dining session.</p>
         </div>
         <button
           onClick={() => setIsReviewModalOpen(true)}
@@ -642,8 +730,8 @@ function MenuContent() {
     );
   }
 
-  // 30-Minute Session Timeout Overlay
-  if (isSessionExpired) {
+  // 3. 30-Minute Timeout View (Persistent across reloads)
+  if (!isBypassMode && isSessionExpired) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="w-20 h-20 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mb-6 shadow-lg shadow-orange-500/20">
@@ -651,17 +739,17 @@ function MenuContent() {
         </div>
         <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Session Expired</h2>
         <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
-          {sessionExpiryReason || "Your 30-minute ordering window has ended to prevent accidental orders."}
+          {sessionExpiryReason || "Your 30-minute ordering window has ended to prevent accidental or remote orders."}
         </p>
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500">
-          <p className="font-bold text-slate-700 mb-1">Still at Table {tableNumber.padStart(2, "0")}?</p>
-          <p>Simply re-scan the QR code on your table to refresh your session and continue ordering.</p>
+          <p className="font-bold text-slate-700 mb-1">Still at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}?</p>
+          <p>Please re-scan the QR code on your table to refresh your session and continue ordering.</p>
         </div>
       </div>
     );
   }
 
-  // Order Success View
+  // 4. Order Placed Confirmation View
   if (orderSuccess) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -740,7 +828,6 @@ function MenuContent() {
             onClick={() => {
               setOrderSuccess(false);
               setPlacedOrderId(null);
-              setTableNumber(localStorage.getItem("active_table") || tableNumber);
             }}
             className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-2xl font-bold tracking-wide transition-colors shadow-lg active:scale-95"
           >
@@ -753,7 +840,7 @@ function MenuContent() {
     );
   }
 
-  // Active Main Menu View
+  // 5. Active Browsable Menu
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pt-16 md:pt-[72px] pb-32 font-sans selection:bg-orange-500/30">
       {isAuthenticated ? (
@@ -788,16 +875,24 @@ function MenuContent() {
               <h1 className="text-slate-900 font-bold text-sm sm:text-base leading-tight truncate">
                 {settings?.name || "Smart POS"}
               </h1>
-              <p className="text-[8px] sm:text-[10px] text-orange-500 font-bold uppercase tracking-wider">Smart QR Menu</p>
+              <p className="text-[8px] sm:text-[10px] text-orange-500 font-bold uppercase tracking-wider">
+                {isBypassMode ? "Staff / Tablet Mode" : "Smart QR Menu"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setIsTableSelectorOpen(true)}
-              className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap"
-            >
-              🍽️ Table {tableNumber.padStart(2, "0")}
-            </button>
+            {isBypassMode ? (
+              <button
+                onClick={() => setIsTableSelectorOpen(true)}
+                className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap"
+              >
+                🍽️ Table {tableNumber.padStart(2, "0")}
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap">
+                🍽️ Table {tableNumber.padStart(2, "0")}
+              </div>
+            )}
             <button
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-colors"
@@ -813,7 +908,7 @@ function MenuContent() {
         </header>
       )}
 
-      {/* Notification Toast */}
+      {/* Toast */}
       {uiToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[150] bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-xl flex items-center gap-2 font-bold text-sm animate-in fade-in slide-in-from-top-2 duration-300">
           {uiToast.type === "success" ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <AlertCircle className="w-5 h-5 text-rose-400" />}
@@ -854,7 +949,7 @@ function MenuContent() {
         )}
       </div>
 
-      {/* Main Dishes Grid */}
+      {/* Food Items Grid */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-4 py-4 sm:py-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 overflow-x-hidden">
         {filteredMenu.map((item) => (
           <MenuItemCard
@@ -874,7 +969,7 @@ function MenuContent() {
         )}
       </main>
 
-      {/* Floating Rate & Review Button */}
+      {/* Floating Review Button */}
       <button
         onClick={() => setIsReviewModalOpen(true)}
         className="fixed bottom-20 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm"
@@ -886,7 +981,7 @@ function MenuContent() {
         <span className="hidden sm:inline">Rate Food & Service</span>
       </button>
 
-      {/* Floating Checkout Button (Desktop) */}
+      {/* Floating Checkout (Desktop) */}
       {cartCount > 0 && (
         <button
           onClick={() => setIsCartOpen(true)}
@@ -899,7 +994,7 @@ function MenuContent() {
         </button>
       )}
 
-      {/* Fixed Bottom Bar Cart (Mobile) */}
+      {/* Floating Mobile Cart Bar */}
       {cartCount > 0 && (
         <div className="md:hidden fixed bottom-2 left-3 right-3 z-40">
           <button
@@ -917,7 +1012,7 @@ function MenuContent() {
         </div>
       )}
 
-      {/* Slide-over Cart Drawer */}
+      {/* Cart Drawer */}
       <div
         className={`fixed inset-0 z-50 transition-all duration-500 ${isCartOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
           }`}
@@ -1006,7 +1101,7 @@ function MenuContent() {
 
       {renderReviewModal()}
 
-      {/* Table Selector Modal */}
+      {/* Tablet / Staff Table Switcher Modal */}
       {isTableSelectorOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40">
           <div className="bg-white rounded-[2rem] w-full max-w-lg p-6 shadow-2xl relative animate-in zoom-in-95 duration-300">
@@ -1018,7 +1113,7 @@ function MenuContent() {
             </button>
 
             <h3 className="text-xl font-bold text-slate-900 mb-1">Select Table</h3>
-            <p className="text-xs text-slate-500 mb-4">Tap on your table to start ordering.</p>
+            <p className="text-xs text-slate-500 mb-4">Tap on table to switch.</p>
 
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[360px] overflow-y-auto p-1 no-scrollbar">
               {availableTables.map((table: any) => {
