@@ -38,9 +38,10 @@ function MenuContent() {
   const [tableNumber, setTableNumber] = useState("");
   const [isTableSelectorOpen, setIsTableSelectorOpen] = useState(false);
 
-  // Security Session State
+  // Security Session & Review State
   const [isSessionExpired, setIsSessionExpired] = useState(false);
   const [isBillSettled, setIsBillSettled] = useState(false);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [sessionExpiryReason, setSessionExpiryReason] = useState("");
   const [noQrDetected, setNoQrDetected] = useState(false);
 
@@ -103,11 +104,11 @@ function MenuContent() {
     if (urlScanToken) {
       const storedToken = localStorage.getItem(tokenKey);
       if (storedToken !== urlScanToken) {
-        // Brand new QR scan: Reset previous lockouts and begin fresh session
         localStorage.setItem(tokenKey, urlScanToken);
         localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
         setIsBillSettled(false);
         setIsSessionExpired(false);
+        setReviewSubmitted(false);
       }
     }
 
@@ -158,7 +159,6 @@ function MenuContent() {
           if (status === "completed") {
             const orderTime = new Date(latestOrder.updated_at || latestOrder.created_at).getTime();
 
-            // If the settlement occurred during this active customer's session, lock them out
             if (parsed && parsed.startTime && orderTime >= parsed.startTime) {
               setIsBillSettled(true);
               setIsCartOpen(false);
@@ -564,6 +564,7 @@ function MenuContent() {
         showToast("Failed to submit review: " + error.message, "error");
       } else {
         setIsReviewModalOpen(false);
+        setReviewSubmitted(true); // Permanent lock to Thank You view
         setReviewComment("");
         setWaiterName("");
         setReviewerName("");
@@ -726,7 +727,26 @@ function MenuContent() {
     );
   }
 
-  // 2. Bill Settled View (Persistent across reloads during active session)
+  // Review Submitted & Locked Final View
+  if (reviewSubmitted) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500 font-sans">
+        <div className="w-24 h-24 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-xl shadow-emerald-500/20 ring-8 ring-emerald-50">
+          <CheckCircle className="w-12 h-12 animate-bounce" />
+        </div>
+        <h2 className="text-3xl font-black text-slate-900 mb-2">Thank You! 🎉</h2>
+        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6 leading-relaxed">
+          Your feedback has been successfully received. We hope you enjoyed your dining experience at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}!
+        </p>
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500 space-y-2">
+          <p className="font-bold text-slate-700">Dining Session Closed</p>
+          <p>You can now safely close this window or leave the table. Have a wonderful day!</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Bill Settled View (Persistent across reloads)
   if (!isBypassMode && isBillSettled) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
@@ -743,7 +763,7 @@ function MenuContent() {
         </div>
         <button
           onClick={() => setIsReviewModalOpen(true)}
-          className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2"
+          className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
         >
           <Star className="w-5 h-5 fill-white" /> Leave a Review
         </button>
@@ -841,7 +861,7 @@ function MenuContent() {
 
           <button
             onClick={() => setIsReviewModalOpen(true)}
-            className="w-full bg-amber-500 hover:bg-amber-600 text-white py-4 rounded-2xl font-bold tracking-wide transition-colors shadow-lg active:scale-95 mb-3 flex justify-center items-center gap-2"
+            className="w-full bg-amber-500 hover:bg-amber-600 text-white py-4 rounded-2xl font-bold tracking-wide transition-colors shadow-lg active:scale-95 mb-3 flex justify-center items-center gap-2 cursor-pointer"
           >
             <Star className="w-5 h-5 fill-white" /> Rate Food & Waiter
           </button>
@@ -851,7 +871,7 @@ function MenuContent() {
               setOrderSuccess(false);
               setPlacedOrderId(null);
             }}
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-2xl font-bold tracking-wide transition-colors shadow-lg active:scale-95"
+            className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-2xl font-bold tracking-wide transition-colors shadow-lg active:scale-95 cursor-pointer"
           >
             Order More
           </button>
@@ -870,13 +890,13 @@ function MenuContent() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsTableSelectorOpen(true)}
-              className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap cursor-pointer"
             >
               🍽️ Table {tableNumber.padStart(2, "0")}
             </button>
             <button
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-colors"
+              className="relative p-2 text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-colors cursor-pointer"
             >
               <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6" />
               {cartCount > 0 && (
@@ -906,7 +926,7 @@ function MenuContent() {
             {isBypassMode ? (
               <button
                 onClick={() => setIsTableSelectorOpen(true)}
-                className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg border border-slate-200 text-slate-700 text-xs font-bold whitespace-nowrap cursor-pointer"
               >
                 🍽️ Table {tableNumber.padStart(2, "0")}
               </button>
@@ -917,7 +937,7 @@ function MenuContent() {
             )}
             <button
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-colors"
+              className="relative p-2 text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-colors cursor-pointer"
             >
               <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6" />
               {cartCount > 0 && (
@@ -994,7 +1014,7 @@ function MenuContent() {
       {/* Floating Review Button */}
       <button
         onClick={() => setIsReviewModalOpen(true)}
-        className="fixed bottom-20 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm"
+        className="fixed bottom-20 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm cursor-pointer"
       >
         <div className="w-7 h-7 rounded-xl bg-amber-400 text-white flex items-center justify-center shadow-sm shrink-0">
           <Star className="w-4 h-4 fill-white text-white" />
@@ -1007,7 +1027,7 @@ function MenuContent() {
       {cartCount > 0 && (
         <button
           onClick={() => setIsCartOpen(true)}
-          className="hidden md:flex fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-tr from-orange-600 to-orange-400 text-white rounded-[2rem] shadow-[0_10px_30px_rgba(249,115,22,0.4)] items-center justify-center z-40 transition-transform hover:scale-105 active:scale-95 border-2 border-white/20"
+          className="hidden md:flex fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-tr from-orange-600 to-orange-400 text-white rounded-[2rem] shadow-[0_10px_30px_rgba(249,115,22,0.4)] items-center justify-center z-40 transition-transform hover:scale-105 active:scale-95 border-2 border-white/20 cursor-pointer"
         >
           <ShoppingBag className="w-7 h-7" />
           <span className="absolute -top-2 -right-2 bg-slate-900 text-white text-xs w-7 h-7 flex items-center justify-center rounded-full font-bold shadow-md border-2 border-white animate-bounce">
@@ -1021,7 +1041,7 @@ function MenuContent() {
         <div className="md:hidden fixed bottom-2 left-3 right-3 z-40">
           <button
             onClick={() => setIsCartOpen(true)}
-            className="w-full bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 flex items-center justify-between shadow-xl shadow-slate-900/20 active:scale-[0.98] transition-transform"
+            className="w-full bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 flex items-center justify-between shadow-xl shadow-slate-900/20 active:scale-[0.98] transition-transform cursor-pointer"
           >
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center font-bold text-sm shadow-inner shadow-white/20">
@@ -1048,7 +1068,7 @@ function MenuContent() {
             <h2 className="text-2xl font-bold text-slate-900">Your Cart</h2>
             <button
               onClick={() => setIsCartOpen(false)}
-              className="w-10 h-10 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+              className="w-10 h-10 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1071,14 +1091,14 @@ function MenuContent() {
                 <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-1 border border-slate-200 shrink-0">
                   <button
                     onClick={() => updateCartById(item.name, -1)}
-                    className="w-8 h-8 flex items-center justify-center bg-white rounded-lg text-slate-700 shadow-sm border border-slate-100 active:scale-90"
+                    className="w-8 h-8 flex items-center justify-center bg-white rounded-lg text-slate-700 shadow-sm border border-slate-100 active:scale-90 cursor-pointer"
                   >
                     <Minus className="w-4 h-4" />
                   </button>
                   <span className="w-6 text-center font-bold text-slate-900">{item.quantity}</span>
                   <button
                     onClick={() => updateCartById(item.name, 1)}
-                    className="w-8 h-8 flex items-center justify-center bg-orange-500 text-white rounded-lg shadow-sm active:scale-90"
+                    className="w-8 h-8 flex items-center justify-center bg-orange-500 text-white rounded-lg shadow-sm active:scale-90 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -1109,7 +1129,7 @@ function MenuContent() {
             <button
               onClick={placeOrder}
               disabled={isSubmitting}
-              className="w-full py-5 bg-gradient-to-r from-orange-500 to-orange-400 hover:from-orange-600 hover:to-orange-500 text-white font-bold rounded-2xl text-xl tracking-wide transition-all shadow-[0_10px_20px_rgba(249,115,22,0.3)] disabled:opacity-70 active:scale-[0.98] flex justify-center"
+              className="w-full py-5 bg-gradient-to-r from-orange-500 to-orange-400 hover:from-orange-600 hover:to-orange-500 text-white font-bold rounded-2xl text-xl tracking-wide transition-all shadow-[0_10px_20px_rgba(249,115,22,0.3)] disabled:opacity-70 active:scale-[0.98] flex justify-center cursor-pointer"
             >
               {isSubmitting ? (
                 <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin" />
@@ -1129,7 +1149,7 @@ function MenuContent() {
           <div className="bg-white rounded-[2rem] w-full max-w-lg p-6 shadow-2xl relative animate-in zoom-in-95 duration-300">
             <button
               onClick={() => setIsTableSelectorOpen(false)}
-              className="absolute top-4 right-4 w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors z-10"
+              className="absolute top-4 right-4 w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors z-10 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1153,7 +1173,7 @@ function MenuContent() {
 
                       setIsTableSelectorOpen(false);
                     }}
-                    className={`flex flex-col items-center justify-center p-3 rounded-2xl border transition-all active:scale-95 ${isActive
+                    className={`flex flex-col items-center justify-center p-3 rounded-2xl border transition-all active:scale-95 cursor-pointer ${isActive
                       ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 border-orange-500 ring-2 ring-orange-500"
                       : "bg-slate-50 hover:bg-orange-50 hover:border-orange-200 border-slate-200 text-slate-800"
                       }`}
