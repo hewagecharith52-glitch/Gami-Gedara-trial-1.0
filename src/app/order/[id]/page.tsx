@@ -774,15 +774,15 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
         </div>
       )}
 
-      {/* Full Screen Completed Modal */}
+      {/* Full Screen Completed Modal (Optimized for Mobile) */}
       {showCompletedModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-500">
-            <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/30 ring-8 ring-emerald-50">
-              <CheckCircle className="w-12 h-12 text-white animate-bounce" />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-xs sm:max-w-sm rounded-[2rem] p-6 sm:p-8 text-center shadow-2xl animate-in zoom-in-95 duration-500 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-5 shadow-lg shadow-emerald-500/30 ring-6 ring-emerald-50 shrink-0">
+              <CheckCircle className="w-8 h-8 sm:w-10 sm:h-10 text-white animate-bounce" />
             </div>
-            <h2 className="text-3xl font-bold text-slate-900 mb-3">Payment Received! 🎉</h2>
-            <p className="text-slate-500 mb-8 font-medium">
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">Payment Received! 🎉</h2>
+            <p className="text-slate-500 text-xs sm:text-sm mb-6 font-medium leading-relaxed">
               Thank you for dining with us. Hope you enjoyed your meal!
             </p>
             <button
@@ -793,7 +793,7 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
                 }
                 setIsReviewModalOpen(true);
               }}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2"
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 sm:py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 text-sm sm:text-base cursor-pointer"
             >
               <Star className="w-5 h-5 fill-white" /> Leave a Review ⭐
             </button>

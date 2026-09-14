@@ -486,10 +486,6 @@ export default function BrickBreaker() {
     };
 
     const touchMoveHandler = (e: TouchEvent) => {
-      // වැදගත්: Canvas එක මත touch කරන විට පිටුව scroll වීම වැළැක්වීමට e.preventDefault() යොදනු ලැබේ
-      if (e.cancelable) {
-        e.preventDefault();
-      }
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const relativeX = e.touches[0].clientX - rect.left;
@@ -520,9 +516,8 @@ export default function BrickBreaker() {
 
     const containerEl = containerRef.current;
     if (containerEl) {
-      // passive: false ලෙස සැකසීමෙන් e.preventDefault() ක්‍රියාත්මක කිරීමට ඉඩ සලසයි
-      containerEl.addEventListener("touchmove", touchMoveHandler, { passive: false });
-      containerEl.addEventListener("touchstart", touchMoveHandler, { passive: false });
+      containerEl.addEventListener("touchmove", touchMoveHandler, { passive: true });
+      containerEl.addEventListener("touchstart", touchMoveHandler, { passive: true });
       containerEl.addEventListener("mousemove", mouseMoveHandler, false);
     }
 
@@ -540,7 +535,7 @@ export default function BrickBreaker() {
   }, []);
 
   return (
-    <div className="bg-[#0f172a] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl font-sans flex flex-col items-center select-none touch-none">
+    <div className="bg-[#0f172a] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl font-sans flex flex-col items-center select-none">
       {/* Header Info */}
       <div className="w-full bg-[#0b1121] text-white p-3 flex justify-between items-center text-sm font-bold border-b border-slate-800">
         <div className="flex items-center gap-3">
@@ -576,12 +571,12 @@ export default function BrickBreaker() {
       </div>
 
       {/* Game Area */}
-      <div className="relative touch-none" ref={containerRef}>
+      <div className="relative" ref={containerRef}>
         <canvas
           ref={canvasRef}
           width={300}
           height={400}
-          className="block mx-auto cursor-none touch-none bg-[#0f172a]"
+          className="block mx-auto cursor-none bg-[#0f172a]"
         />
 
         {/* Overlays */}
