@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, use } from "react";
 import { supabase } from "@/lib/supabase";
 import { restaurantConfig } from "@/config/restaurant.config";
-import { Clock, ChefHat, CheckCircle, Store, BellRing, MapPin, UtensilsCrossed, Wifi, WifiOff, Gamepad2, ChevronDown, ChevronUp } from "lucide-react";
+import { Clock, ChefHat, CheckCircle, Store, BellRing, MapPin, UtensilsCrossed, Wifi, WifiOff, Gamepad2, ChevronDown, ChevronUp, Star, X, AlertCircle } from "lucide-react";
 import confetti from "canvas-confetti";
 import Link from "next/link";
 import BrickBreaker from "@/components/BrickBreaker";
@@ -97,6 +97,16 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
   const [isConnected, setIsConnected] = useState(false);
   const [showGame, setShowGame] = useState(true);
 
+  // Review Modal State for Tracking Page
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [foodRating, setFoodRating] = useState(5);
+  const [serviceRating, setServiceRating] = useState(5);
+  const [waiterName, setWaiterName] = useState("");
+  const [reviewerName, setReviewerName] = useState("");
+  const [reviewComment, setReviewComment] = useState("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [uiToast, setUiToast] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
   const channelRef = useRef<any>(null);
 
   const { settings } = useSettings();
@@ -105,7 +115,7 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
   const currencySymbol = settings?.currency || restaurantConfig.currency || 'LKR';
 
   // Lock body scroll when modals are visible
-  const isAnyModalOpen = Boolean(showReadyModal || showCompletedModal);
+  const isAnyModalOpen = Boolean(showReadyModal || showCompletedModal || isReviewModalOpen);
   useEffect(() => {
     if (isAnyModalOpen) {
       document.body.style.overflow = "hidden";
@@ -116,6 +126,11 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
       document.body.style.overflow = "unset";
     };
   }, [isAnyModalOpen]);
+
+  const showToast = (text: string, type: "success" | "error" = "success") => {
+    setUiToast({ text, type });
+    setTimeout(() => setUiToast(null), 4000);
+  };
 
   const calculatePrepTime = async (items: OrderItem[]) => {
     try {
@@ -188,6 +203,43 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
       origin: { y: 0.5 },
       colors: ['#10b981', '#34d399', '#ffffff']
     });
+  };
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingReview(true);
+
+    try {
+      const payload = {
+        table_no: String(order?.table_no || "1"),
+        food_rating: Number(foodRating),
+        service_rating: Number(serviceRating),
+        waiter_name: waiterName.trim() || "Staff",
+        customer_name: reviewerName.trim() || "Guest",
+        comment: reviewComment.trim() || null
+      };
+
+      const { error } = await supabase.from("customer_reviews").insert([payload]);
+
+      if (error) {
+        showToast("Failed to submit review: " + error.message, "error");
+      } else {
+        setIsReviewModalOpen(false);
+        setReviewComment("");
+        setWaiterName("");
+        setReviewerName("");
+        showToast("Thank you! Your feedback has been received.", "success");
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.7 }
+        });
+      }
+    } catch (err: any) {
+      showToast("Error: " + err.message, "error");
+    } finally {
+      setIsSubmittingReview(false);
+    }
   };
 
   useEffect(() => {
@@ -302,8 +354,125 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
   const steps = ["pending", "preparing", "ready", "completed"];
   const currentStepIdx = steps.indexOf(normalizedStatus);
 
+  const renderReviewModal = () => {
+    if (!isReviewModalOpen) return null;
+    return (
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div className="bg-white rounded-3xl w-full max-w-sm p-4 sm:p-5 shadow-2xl relative animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto no-scrollbar">
+          <button
+            onClick={() => setIsReviewModalOpen(false)}
+            className="absolute top-3.5 right-3.5 w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="text-center mb-2.5">
+            <div className="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-1 text-amber-600">
+              <Star className="w-4 h-4 fill-amber-500 text-amber-500" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 leading-tight">Rate Experience</h3>
+            <p className="text-[10px] text-slate-500 mt-0.5">Table {order?.table_no ? order.table_no.padStart(2, '0') : ''} • Help us serve you better!</p>
+          </div>
+
+          <form onSubmit={handleReviewSubmit} className="space-y-2.5">
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">🍲 Food Quality</span>
+                <span className="text-[10px] font-bold text-amber-600">{foodRating}/5</span>
+              </div>
+              <div className="flex gap-1.5 justify-center py-0.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    type="button"
+                    key={star}
+                    onClick={() => setFoodRating(star)}
+                    className="p-1 transition-transform hover:scale-110 active:scale-95"
+                  >
+                    <Star
+                      className={`w-5 h-5 ${star <= foodRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">🤵 Waiter & Service</span>
+                <span className="text-[10px] font-bold text-amber-600">{serviceRating}/5</span>
+              </div>
+              <div className="flex gap-1.5 justify-center py-0.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    type="button"
+                    key={star}
+                    onClick={() => setServiceRating(star)}
+                    className="p-1 transition-transform hover:scale-110 active:scale-95"
+                  >
+                    <Star
+                      className={`w-5 h-5 ${star <= serviceRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Waiter Name</label>
+                <input
+                  type="text"
+                  value={waiterName}
+                  onChange={(e) => setWaiterName(e.target.value)}
+                  placeholder="e.g. Kamal"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Your Name</label>
+                <input
+                  type="text"
+                  value={reviewerName}
+                  onChange={(e) => setReviewerName(e.target.value)}
+                  placeholder="e.g. Kasun"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Comments</label>
+              <textarea
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="Share your thoughts..."
+                rows={2}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-medium text-slate-800 outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmittingReview}
+              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              {isSubmittingReview ? "Submitting..." : "Submit Review ⭐"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20 selection:bg-orange-500/30">
+      {uiToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[150] bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-xl flex items-center gap-2 font-bold text-sm animate-in fade-in slide-in-from-top-2 duration-300">
+          {uiToast.type === "success" ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <AlertCircle className="w-5 h-5 text-rose-400" />}
+          {uiToast.text}
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{
         __html: `
         @keyframes steamRise {
@@ -571,11 +740,16 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
             <UtensilsCrossed className="w-5 h-5" /> Order More Items
           </Link>
         ) : (
-          <div className="w-full text-center py-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 font-bold text-sm">
-            🎉 Order Settled & Completed. Thank you!
-          </div>
+          <button
+            onClick={() => setIsReviewModalOpen(true)}
+            className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 flex items-center justify-center gap-2 transition-all cursor-pointer"
+          >
+            <Star className="w-5 h-5 fill-white" /> Leave a Review ⭐
+          </button>
         )}
       </main>
+
+      {renderReviewModal()}
 
       {/* Full Screen Ready Modal */}
       {showReadyModal && (
@@ -617,11 +791,11 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
                 if (order?.table_no) {
                   localStorage.setItem(`pos_table_lock_${order.table_no}`, "SETTLED");
                 }
-                window.location.href = `/menu?table=${order?.table_no || 1}`;
+                setIsReviewModalOpen(true);
               }}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-emerald-500/30"
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2"
             >
-              Finish & Return Home
+              <Star className="w-5 h-5 fill-white" /> Leave a Review ⭐
             </button>
           </div>
         </div>

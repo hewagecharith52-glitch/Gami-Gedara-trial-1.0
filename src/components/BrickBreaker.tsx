@@ -486,6 +486,10 @@ export default function BrickBreaker() {
     };
 
     const touchMoveHandler = (e: TouchEvent) => {
+      // වැදගත්: Canvas එක මත touch කරන විට පිටුව scroll වීම වැළැක්වීමට e.preventDefault() යොදනු ලැබේ
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const relativeX = e.touches[0].clientX - rect.left;
@@ -516,8 +520,9 @@ export default function BrickBreaker() {
 
     const containerEl = containerRef.current;
     if (containerEl) {
-      containerEl.addEventListener("touchmove", touchMoveHandler, { passive: true });
-      containerEl.addEventListener("touchstart", touchMoveHandler, { passive: true });
+      // passive: false ලෙස සැකසීමෙන් e.preventDefault() ක්‍රියාත්මක කිරීමට ඉඩ සලසයි
+      containerEl.addEventListener("touchmove", touchMoveHandler, { passive: false });
+      containerEl.addEventListener("touchstart", touchMoveHandler, { passive: false });
       containerEl.addEventListener("mousemove", mouseMoveHandler, false);
     }
 
