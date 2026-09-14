@@ -33,6 +33,7 @@ function MenuContent() {
   const searchParams = useSearchParams();
   const urlTableNumber = searchParams.get("table");
   const urlMode = searchParams.get("mode"); // e.g. mode=tablet to bypass locks
+  const urlScanToken = searchParams.get("t"); // Dynamic fresh QR scan token if available
 
   const [tableNumber, setTableNumber] = useState("");
   const [isTableSelectorOpen, setIsTableSelectorOpen] = useState(false);
@@ -46,7 +47,7 @@ function MenuContent() {
   const { isAuthenticated } = useAuth();
   const { settings } = useSettings();
 
-  // Is this an in-house restaurant tablet or staff member?
+  // Staff or in-house restaurant tablet bypass
   const isBypassMode = Boolean(isAuthenticated || urlMode === "tablet");
 
   const [activeCategory, setActiveCategory] = useState("All");
@@ -75,11 +76,10 @@ function MenuContent() {
     setMounted(true);
   }, []);
 
-  // 1. Session Evaluation with Refresh-Persistence Protection
+  // 1. Fresh QR Evaluation & Session Check
   useEffect(() => {
     if (!mounted) return;
 
-    // Staff or In-house Tablet bypasses all expiry checks
     if (isBypassMode) {
       const activeTable = urlTableNumber || localStorage.getItem("active_table") || "1";
       setTableNumber(activeTable);
@@ -98,8 +98,15 @@ function MenuContent() {
 
     const lockKey = `pos_table_lock_${activeTable}`;
     const sessionKey = `pos_table_session_${activeTable}`;
+    const lastScanTokenKey = `pos_table_token_${activeTable}`;
 
-    // Check if table was permanently locked (Settled or Expired)
+    // If an explicit scan token is in URL and it is new, reset old locks
+    if (urlScanToken && localStorage.getItem(lastScanTokenKey) !== urlScanToken) {
+      localStorage.removeItem(lockKey);
+      localStorage.removeItem(sessionKey);
+      localStorage.setItem(lastScanTokenKey, urlScanToken);
+    }
+
     const isLocked = localStorage.getItem(lockKey);
     if (isLocked === "SETTLED") {
       setIsBillSettled(true);
@@ -110,7 +117,6 @@ function MenuContent() {
       return;
     }
 
-    // Evaluate time session
     const storedSession = localStorage.getItem(sessionKey);
     if (storedSession) {
       try {
@@ -127,7 +133,7 @@ function MenuContent() {
     } else {
       localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now() }));
     }
-  }, [mounted, urlTableNumber, isBypassMode]);
+  }, [mounted, urlTableNumber, urlScanToken, isBypassMode]);
 
   // 2. Initial Database Verification for Active vs Settled
   useEffect(() => {
@@ -145,13 +151,18 @@ function MenuContent() {
         if (!error && data && data.length > 0) {
           const latestOrder = data[0];
           const status = String(latestOrder.status).toLowerCase();
+          const lockKey = `pos_table_lock_${tableNumber}`;
+          const sessionKey = `pos_table_session_${tableNumber}`;
 
-          // If the order is already completed, check if customer was part of it
-          if (status === "completed") {
-            const lockKey = `pos_table_lock_${tableNumber}`;
-            if (localStorage.getItem(lockKey) === "SETTLED") {
-              setIsBillSettled(true);
-            }
+          // Check if order was completed long ago (e.g., more than 40 mins ago), if so unlock for next customer
+          const orderAge = Date.now() - new Date(latestOrder.created_at).getTime();
+          if (status === "completed" && orderAge > 40 * 60 * 1000) {
+            localStorage.removeItem(lockKey);
+            localStorage.removeItem(sessionKey);
+            setIsBillSettled(false);
+            setIsSessionExpired(false);
+          } else if (status === "completed" && localStorage.getItem(lockKey) === "SETTLED") {
+            setIsBillSettled(true);
           }
         }
       } catch (e) {
@@ -565,109 +576,108 @@ function MenuContent() {
       name: `Table ${String(i + 1).padStart(2, "0")}`
     }));
 
+  // Compact, Mobile-Optimized Review Modal
   const renderReviewModal = () => {
     if (!isReviewModalOpen) return null;
     return (
-      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60">
-        <div className="bg-white rounded-[2.5rem] w-full max-w-md p-6 sm:p-8 shadow-2xl relative animate-in zoom-in-95 duration-300">
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div className="bg-white rounded-3xl w-full max-w-sm p-4 sm:p-6 shadow-2xl relative animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto no-scrollbar">
           <button
             onClick={() => setIsReviewModalOpen(false)}
-            className="absolute top-5 right-5 w-9 h-9 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors"
+            className="absolute top-3.5 right-3.5 w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
 
-          <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-amber-600">
-              <Star className="w-7 h-7 fill-amber-500 text-amber-500" />
+          <div className="text-center mb-3">
+            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-1.5 text-amber-600">
+              <Star className="w-5 h-5 fill-amber-500 text-amber-500" />
             </div>
-            <h3 className="text-2xl font-bold text-slate-900">Rate Your Experience</h3>
-            <p className="text-xs text-slate-500 mt-1">Table {tableNumber} • Help us serve you better!</p>
+            <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">Rate Your Experience</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">Table {tableNumber ? tableNumber.padStart(2, '0') : ''} • Help us improve!</p>
           </div>
 
-          <form onSubmit={handleReviewSubmit} className="space-y-5">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-600">🍲 Food Quality</span>
-                <span className="text-xs font-bold text-amber-600">{foodRating} of 5</span>
+          <form onSubmit={handleReviewSubmit} className="space-y-3">
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">🍲 Food Quality</span>
+                <span className="text-[11px] font-bold text-amber-600">{foodRating}/5</span>
               </div>
-              <div className="flex gap-2 justify-center py-1">
+              <div className="flex gap-1.5 justify-center py-0.5">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     type="button"
                     key={star}
                     onClick={() => setFoodRating(star)}
-                    className="p-1.5 transition-transform hover:scale-125 active:scale-95"
+                    className="p-1 transition-transform hover:scale-110 active:scale-95"
                   >
                     <Star
-                      className={`w-8 h-8 ${star <= foodRating ? "fill-amber-400 text-amber-400" : "text-slate-300"
-                        }`}
+                      className={`w-6 h-6 ${star <= foodRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
                     />
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-600">🤵 Waiter & Service</span>
-                <span className="text-xs font-bold text-amber-600">{serviceRating} of 5</span>
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">🤵 Waiter & Service</span>
+                <span className="text-[11px] font-bold text-amber-600">{serviceRating}/5</span>
               </div>
-              <div className="flex gap-2 justify-center py-1">
+              <div className="flex gap-1.5 justify-center py-0.5">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     type="button"
                     key={star}
                     onClick={() => setServiceRating(star)}
-                    className="p-1.5 transition-transform hover:scale-125 active:scale-95"
+                    className="p-1 transition-transform hover:scale-110 active:scale-95"
                   >
                     <Star
-                      className={`w-8 h-8 ${star <= serviceRating ? "fill-amber-400 text-amber-400" : "text-slate-300"
-                        }`}
+                      className={`w-6 h-6 ${star <= serviceRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
                     />
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">Waiter Name</label>
+                <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Waiter Name</label>
                 <input
                   type="text"
                   value={waiterName}
                   onChange={(e) => setWaiterName(e.target.value)}
                   placeholder="e.g. Kamal"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">Your Name</label>
+                <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Your Name</label>
                 <input
                   type="text"
                   value={reviewerName}
                   onChange={(e) => setReviewerName(e.target.value)}
                   placeholder="e.g. Kasun"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-400"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">Comments or Suggestions</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Comments</label>
               <textarea
                 value={reviewComment}
                 onChange={(e) => setReviewComment(e.target.value)}
                 placeholder="Tell us what you loved or how we can improve..."
                 rows={2}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-800 outline-none focus:border-amber-400"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-medium text-slate-800 outline-none focus:border-amber-400"
               />
             </div>
 
             <button
               type="submit"
               disabled={isSubmittingReview}
-              className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-2xl text-base shadow-lg shadow-amber-500/25 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-xl text-sm shadow-md shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               {isSubmittingReview ? "Submitting..." : "Submit Review ⭐"}
             </button>
