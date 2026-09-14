@@ -313,7 +313,7 @@ export default function BrickBreaker() {
     };
 
     const collisionDetection = () => {
-      const { ball, paddle, bricks, brickConfig } = stateRef.current;
+      const { ball, bricks, brickConfig } = stateRef.current;
       let hit = false;
 
       for (let c = 0; c < brickConfig.columnCount; c++) {
@@ -362,6 +362,7 @@ export default function BrickBreaker() {
                 ball.y = canvasRef.current?.height ? canvasRef.current.height - 30 : 300;
                 ball.dx = 3.5 * (Math.random() > 0.5 ? 1 : -1);
                 ball.dy = -3.5;
+                const paddle = stateRef.current.paddle;
                 paddle.x = canvasRef.current?.width ? (canvasRef.current.width - paddle.width) / 2 : 110;
                 paddle.width = 80;
                 stateRef.current.paddleTimer = 0;
@@ -488,7 +489,8 @@ export default function BrickBreaker() {
     const touchMoveHandler = (e: TouchEvent) => {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const relativeX = e.touches[0].clientX - rect.left;
+      const scaleX = canvasRef.current.width / rect.width;
+      const relativeX = (e.touches[0].clientX - rect.left) * scaleX;
       if (relativeX > 0 && relativeX < canvasRef.current.width) {
         stateRef.current.paddle.x = relativeX - stateRef.current.paddle.width / 2;
         if (stateRef.current.paddle.x < 0) stateRef.current.paddle.x = 0;
@@ -501,7 +503,8 @@ export default function BrickBreaker() {
     const mouseMoveHandler = (e: MouseEvent) => {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const relativeX = e.clientX - rect.left;
+      const scaleX = canvasRef.current.width / rect.width;
+      const relativeX = (e.clientX - rect.left) * scaleX;
       if (relativeX > 0 && relativeX < canvasRef.current.width) {
         stateRef.current.paddle.x = relativeX - stateRef.current.paddle.width / 2;
         if (stateRef.current.paddle.x < 0) stateRef.current.paddle.x = 0;
@@ -535,48 +538,48 @@ export default function BrickBreaker() {
   }, []);
 
   return (
-    <div className="bg-[#0f172a] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl font-sans flex flex-col items-center select-none">
+    <div className="w-full max-w-[320px] mx-auto bg-[#0f172a] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl font-sans flex flex-col items-center select-none">
       {/* Header Info */}
-      <div className="w-full bg-[#0b1121] text-white p-3 flex justify-between items-center text-sm font-bold border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-md border border-slate-800">
-            <Trophy className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-amber-400 text-xs tracking-wider">{highScore}</span>
+      <div className="w-full bg-[#0b1121] text-white p-2.5 sm:p-3 flex justify-between items-center text-xs sm:text-sm font-bold border-b border-slate-800">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1 bg-slate-900 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md border border-slate-800">
+            <Trophy className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400" />
+            <span className="text-amber-400 text-[10px] sm:text-xs tracking-wider">{highScore}</span>
           </div>
           {multiplier > 1 && (
-            <div className="flex items-center gap-1 text-cyan-400 animate-pulse text-xs bg-cyan-900/30 px-2 py-1 rounded-md border border-cyan-800">
-              <Zap className="w-3 h-3 fill-cyan-400" /> x{multiplier}
+            <div className="flex items-center gap-0.5 text-cyan-400 animate-pulse text-[10px] sm:text-xs bg-cyan-900/30 px-1.5 py-0.5 rounded-md border border-cyan-800">
+              <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-cyan-400" /> x{multiplier}
             </div>
           )}
-          <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1">
+          <div className="text-[9px] sm:text-[10px] text-slate-400 uppercase tracking-widest font-bold">
             Lvl {currentLevel + 1}
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2.5 sm:gap-4">
           <div className="flex flex-col items-end leading-tight">
-            <span className="text-[9px] text-slate-500 uppercase tracking-widest">Score</span>
-            <span className="text-emerald-400 text-base">{score}</span>
+            <span className="text-[8px] sm:text-[9px] text-slate-500 uppercase tracking-widest">Score</span>
+            <span className="text-emerald-400 text-sm sm:text-base font-black">{score}</span>
           </div>
-          <div className="flex gap-1 bg-slate-900 p-1.5 rounded-md border border-slate-800">
+          <div className="flex gap-1 bg-slate-900 p-1 sm:p-1.5 rounded-md border border-slate-800">
             {[...Array(3)].map((_, i) => (
               <Heart
                 key={i}
-                className={`w-3.5 h-3.5 transition-all ${i < lives ? 'text-rose-500 fill-rose-500' : 'text-slate-800'
+                className={`w-3 h-3 sm:w-3.5 sm:h-3.5 transition-all ${i < lives ? 'text-rose-500 fill-rose-500' : 'text-slate-800'
                   }`}
               />
             ))}
-            {lives > 3 && <span className="text-rose-500 text-xs ml-1 font-bold">+{lives - 3}</span>}
+            {lives > 3 && <span className="text-rose-500 text-[10px] sm:text-xs ml-0.5 font-bold">+{lives - 3}</span>}
           </div>
         </div>
       </div>
 
       {/* Game Area */}
-      <div className="relative" ref={containerRef}>
+      <div className="relative w-full flex justify-center bg-[#0f172a]" ref={containerRef}>
         <canvas
           ref={canvasRef}
           width={300}
           height={400}
-          className="block mx-auto cursor-none bg-[#0f172a]"
+          className="block w-full max-w-[300px] aspect-[3/4] h-auto cursor-none bg-[#0f172a] touch-none"
         />
 
         {/* Overlays */}
@@ -584,51 +587,51 @@ export default function BrickBreaker() {
           <div className="absolute inset-0 bg-[#0f172a]/60 backdrop-blur-[2px] flex items-center justify-center">
             <button
               onClick={togglePlay}
-              className="bg-cyan-500 hover:bg-cyan-400 text-[#0f172a] p-4 rounded-full shadow-[0_0_20px_rgba(6,182,212,0.6)] transition-all active:scale-90"
+              className="bg-cyan-500 hover:bg-cyan-400 text-[#0f172a] p-3.5 sm:p-4 rounded-full shadow-[0_0_20px_rgba(6,182,212,0.6)] transition-all active:scale-90 cursor-pointer"
             >
-              <Play className="w-8 h-8 ml-1 fill-[#0f172a]" />
+              <Play className="w-7 h-7 sm:w-8 sm:h-8 ml-1 fill-[#0f172a]" />
             </button>
           </div>
         )}
 
         {gameOver && (
-          <div className="absolute inset-0 bg-[#0f172a]/90 flex flex-col items-center justify-center text-white p-6 text-center animate-in fade-in zoom-in duration-300 backdrop-blur-sm">
-            <Gamepad2 className="w-12 h-12 text-rose-500 mb-2 drop-shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
-            <h3 className="text-2xl font-black tracking-wider text-rose-500 mb-1">GAME OVER</h3>
-            <p className="text-slate-400 mb-6 font-medium text-sm">
+          <div className="absolute inset-0 bg-[#0f172a]/90 flex flex-col items-center justify-center text-white p-4 sm:p-6 text-center animate-in fade-in zoom-in duration-300 backdrop-blur-sm">
+            <Gamepad2 className="w-10 h-10 sm:w-12 sm:h-12 text-rose-500 mb-2 drop-shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
+            <h3 className="text-xl sm:text-2xl font-black tracking-wider text-rose-500 mb-1">GAME OVER</h3>
+            <p className="text-slate-400 mb-4 sm:mb-6 font-medium text-xs sm:text-sm">
               Final Score: <span className="text-emerald-400 font-bold">{score}</span>
             </p>
             <button
               onClick={resetGame}
-              className="flex items-center gap-2 bg-slate-800 text-white border border-slate-700 px-6 py-3 rounded-xl font-bold hover:bg-slate-700 hover:border-slate-600 active:scale-95 transition-all"
+              className="flex items-center gap-2 bg-slate-800 text-white border border-slate-700 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-slate-700 hover:border-slate-600 active:scale-95 transition-all text-xs sm:text-sm cursor-pointer"
             >
-              <RotateCcw className="w-5 h-5 text-cyan-400" /> Play Again
+              <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" /> Play Again
             </button>
           </div>
         )}
 
         {gameWon && (
-          <div className="absolute inset-0 bg-[#0f172a]/90 flex flex-col items-center justify-center text-white p-6 text-center animate-in fade-in zoom-in duration-300 backdrop-blur-sm">
-            <Trophy className="w-12 h-12 text-amber-400 mb-2 drop-shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
-            <h3 className="text-2xl font-black tracking-wider text-amber-400 mb-1">YOU WIN!</h3>
-            <p className="text-slate-400 mb-6 font-medium text-sm">
+          <div className="absolute inset-0 bg-[#0f172a]/90 flex flex-col items-center justify-center text-white p-4 sm:p-6 text-center animate-in fade-in zoom-in duration-300 backdrop-blur-sm">
+            <Trophy className="w-10 h-10 sm:w-12 sm:h-12 text-amber-400 mb-2 drop-shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
+            <h3 className="text-xl sm:text-2xl font-black tracking-wider text-amber-400 mb-1">YOU WIN!</h3>
+            <p className="text-slate-400 mb-4 sm:mb-6 font-medium text-xs sm:text-sm">
               Final Score: <span className="text-emerald-400 font-bold">{score}</span>
             </p>
             <button
               onClick={resetGame}
-              className="flex items-center gap-2 bg-slate-800 text-white border border-slate-700 px-6 py-3 rounded-xl font-bold hover:bg-slate-700 hover:border-slate-600 active:scale-95 transition-all"
+              className="flex items-center gap-2 bg-slate-800 text-white border border-slate-700 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-slate-700 hover:border-slate-600 active:scale-95 transition-all text-xs sm:text-sm cursor-pointer"
             >
-              <RotateCcw className="w-5 h-5 text-cyan-400" /> Play Again
+              <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" /> Play Again
             </button>
           </div>
         )}
       </div>
 
       {/* Controls / Footer */}
-      <div className="w-full bg-[#0b1121] p-2 flex justify-between items-center text-[10px] text-slate-500 font-medium border-t border-slate-800 uppercase tracking-widest">
+      <div className="w-full bg-[#0b1121] p-2 sm:p-2.5 flex justify-between items-center text-[9px] sm:text-[10px] text-slate-500 font-medium border-t border-slate-800 uppercase tracking-widest">
         <span>Drag or ← →</span>
-        <button onClick={togglePlay} className="flex items-center gap-1 hover:text-cyan-400 transition-colors p-1">
-          {isPlaying ? <><Pause className="w-3.5 h-3.5" /> Pause</> : <><Play className="w-3.5 h-3.5" /> Play</>}
+        <button onClick={togglePlay} className="flex items-center gap-1 hover:text-cyan-400 transition-colors p-0.5 sm:p-1 cursor-pointer">
+          {isPlaying ? <><Pause className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> Pause</> : <><Play className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> Play</>}
         </button>
       </div>
     </div>

@@ -1011,10 +1011,10 @@ function MenuContent() {
         )}
       </main>
 
-      {/* Floating Review Button */}
+      {/* Floating Review Button - Repositioned slightly higher (bottom-28) to prevent covering food card prices */}
       <button
         onClick={() => setIsReviewModalOpen(true)}
-        className="fixed bottom-20 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm cursor-pointer"
+        className="fixed bottom-28 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm cursor-pointer"
       >
         <div className="w-7 h-7 rounded-xl bg-amber-400 text-white flex items-center justify-center shadow-sm shrink-0">
           <Star className="w-4 h-4 fill-white text-white" />

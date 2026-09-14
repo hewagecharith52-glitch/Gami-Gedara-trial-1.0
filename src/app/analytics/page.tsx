@@ -59,7 +59,6 @@ type Order = {
   payment_method?: string;
 };
 
-// Local Timezone Safe Date Matcher (YYYY-MM-DD)
 function isSameLocalDate(dateA: Date, dateB: Date): boolean {
   return (
     dateA.getFullYear() === dateB.getFullYear() &&
@@ -142,7 +141,6 @@ export default function AnalyticsPage() {
   const [customDate, setCustomDate] = useState<string>(getTodayLocalDateString());
   const [isLoading, setIsLoading] = useState(true);
 
-  // Bill Viewer & Transactions State
   const [transactionSearch, setTransactionSearch] = useState("");
   const [transactionDateFilter, setTransactionDateFilter] = useState<"Today" | "Yesterday" | "Last 7 Days" | "Custom Date">("Today");
   const [customDateRange, setCustomDateRange] = useState({ start: "", end: "" });
@@ -298,7 +296,6 @@ export default function AnalyticsPage() {
     }
   }, [printOrder]);
 
-  // Primary Global Time-Filter for Orders
   const orders = useMemo(() => {
     const now = new Date();
     return allOrders.filter(order => {
@@ -324,7 +321,6 @@ export default function AnalyticsPage() {
     });
   }, [allOrders, timeFilter, customDate]);
 
-  // Reconciliations Filtered by the Selected Time Period
   const filteredReconciliations = useMemo(() => {
     const now = new Date();
     return pastReconciliations.filter((rec) => {
@@ -346,7 +342,6 @@ export default function AnalyticsPage() {
     });
   }, [pastReconciliations, timeFilter, customDate]);
 
-  // Petty Cash Logs Filtered by Selected Time Period
   const allFilteredPettyCash = useMemo(() => {
     const now = new Date();
     return pettyCashLogs.filter(log => {
@@ -369,7 +364,6 @@ export default function AnalyticsPage() {
   const activePettyCash = allFilteredPettyCash.filter(log => !log.is_voided);
   const voidedPettyCash = allFilteredPettyCash.filter(log => log.is_voided);
 
-  // Revenue & Payment Method Calculations for Selected Time Period
   const { periodCashRevenue, periodCardRevenue, calculatedDiscounts } = useMemo(() => {
     let cRev = 0;
     let cdRev = 0;
@@ -402,7 +396,6 @@ export default function AnalyticsPage() {
     return { periodCashRevenue: cRev, periodCardRevenue: cdRev, calculatedDiscounts: disc };
   }, [orders, settings.service_charge_pct]);
 
-  // Petty Cash Expenses inside selected period
   const autoPettyCashTotal = useMemo(() => {
     return activePettyCash.reduce(
       (sum, log) => sum + (Number(log.amount || 0) - Number(log.returned_change || 0)),
@@ -410,7 +403,6 @@ export default function AnalyticsPage() {
     );
   }, [activePettyCash]);
 
-  // Financial summary mapped to the chosen filter
   const cashRevenue = periodCashRevenue;
   const cardRevenue = periodCardRevenue;
   const discountsGiven = calculatedDiscounts;
@@ -469,7 +461,6 @@ export default function AnalyticsPage() {
     }
   };
 
-  // Synchronized Transactions: respects both the main filter and sub-filters
   const transactionOrders = useMemo(() => {
     let filtered = allOrders;
     const now = new Date();
@@ -534,6 +525,7 @@ export default function AnalyticsPage() {
   });
   const topItems = Object.values(itemMap).sort((a, b) => b.qty - a.qty).slice(0, 5);
 
+  // Dynamic Sales Hours: පලමු sale එකේ සිට අවසාන sale එක දක්වා පමණක් chart එකට ගැනීම
   const hourlyData = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, i) => ({
       hour: i,
@@ -544,10 +536,16 @@ export default function AnalyticsPage() {
       averageOrderValue: 0
     }));
 
+    let minHourWithSale = 24;
+    let maxHourWithSale = -1;
+
     orders.forEach(order => {
       const orderHour = new Date(order.created_at).getHours();
       buckets[orderHour].totalRevenue += Number(order.total_amount || 0);
       buckets[orderHour].orderCount += 1;
+
+      if (orderHour < minHourWithSale) minHourWithSale = orderHour;
+      if (orderHour > maxHourWithSale) maxHourWithSale = orderHour;
     });
 
     buckets.forEach(b => {
@@ -556,20 +554,33 @@ export default function AnalyticsPage() {
       }
     });
 
-    return buckets;
+    // කිසිදු sale එකක් නැතිනම් දහවල් කාලය පමණක් පෙන්වයි
+    if (maxHourWithSale === -1) {
+      return buckets.slice(10, 22);
+    }
+
+    // පළමු sale එකේ සිට අවසාන sale එක දක්වා පැය පෙළගස්වයි
+    return buckets.slice(minHourWithSale, maxHourWithSale + 1);
   }, [orders]);
 
   const peakHour = useMemo(() => {
+    if (hourlyData.length === 0) return null;
     return hourlyData.reduce((max, current) => current.totalRevenue > max.totalRevenue ? current : max, hourlyData[0]);
   }, [hourlyData]);
 
   const lunchRushTotal = useMemo(() => {
-    return hourlyData.slice(12, 15).reduce((sum, h) => sum + h.totalRevenue, 0);
-  }, [hourlyData]);
+    return orders.reduce((sum, order) => {
+      const h = new Date(order.created_at).getHours();
+      return (h >= 12 && h < 15) ? sum + Number(order.total_amount || 0) : sum;
+    }, 0);
+  }, [orders]);
 
   const dinnerRushTotal = useMemo(() => {
-    return hourlyData.slice(19, 22).reduce((sum, h) => sum + h.totalRevenue, 0);
-  }, [hourlyData]);
+    return orders.reduce((sum, order) => {
+      const h = new Date(order.created_at).getHours();
+      return (h >= 19 && h < 22) ? sum + Number(order.total_amount || 0) : sum;
+    }, 0);
+  }, [orders]);
 
   if (isLoading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center font-bold">Loading Analytics...</div>;
 
@@ -1104,7 +1115,7 @@ export default function AnalyticsPage() {
               </div>
             </div>
 
-            {/* Hourly Sales Chart */}
+            {/* Hourly Sales Chart - Dynamic Sales Time Window */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100">
               <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
                 <h3 className="font-bold text-slate-900 flex items-center gap-2 tracking-wide text-lg sm:text-xl">
@@ -1135,22 +1146,23 @@ export default function AnalyticsPage() {
               <div className="w-full h-[260px] sm:h-[360px] mt-4">
                 {isMounted ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourlyData} margin={{ top: 20, right: 20, left: 10, bottom: 15 }}>
+                    <BarChart data={hourlyData} margin={{ top: 20, right: 10, left: -10, bottom: 15 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
                         dataKey="label"
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
                         dy={8}
-                        interval={1}
+                        interval="preserveStartEnd"
+                        minTickGap={16}
                       />
                       <YAxis
                         axisLine={false}
                         tickLine={false}
-                        width={65}
+                        width={58}
                         domain={[0, 'auto']}
-                        tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
                         tickFormatter={(val) => {
                           if (val === 0) return `0`;
                           if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
@@ -1159,16 +1171,16 @@ export default function AnalyticsPage() {
                         }}
                       />
                       <Tooltip
-                        contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', color: '#fff' }}
+                        contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
                         itemStyle={{ color: '#fff7ed', fontWeight: 'bold' }}
-                        cursor={{ fill: '#f1f5f9' }}
+                        cursor={{ fill: 'rgba(241, 245, 249, 0.6)' }}
                         formatter={(value: any) => [`${settings.currency}${Number(value).toLocaleString()}`, 'Sales']}
                       />
                       <Bar
                         dataKey="totalRevenue"
                         fill="#f97316"
                         radius={[6, 6, 0, 0]}
-                        maxBarSize={28}
+                        maxBarSize={32}
                       />
                     </BarChart>
                   </ResponsiveContainer>
