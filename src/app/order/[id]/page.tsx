@@ -77,9 +77,7 @@ const playReadyAlert = () => {
   if (typeof navigator !== "undefined" && navigator.vibrate && navigator.userActivation?.hasBeenActive) {
     try {
       navigator.vibrate([200, 100, 200, 100, 400]);
-    } catch (e) {
-      // Quietly catch intervention error
-    }
+    } catch (e) { }
   }
 };
 
@@ -155,6 +153,9 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
 
       if (data.status?.toLowerCase() === "completed" && !hasTriggeredCompletedAlert) {
         triggerCompletedEffects();
+        if (data.table_no) {
+          localStorage.setItem(`pos_table_lock_${data.table_no}`, "SETTLED");
+        }
       }
     } catch (err: any) {
       setError(err.message);
@@ -227,6 +228,9 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
 
           if (updatedOrder.status?.toLowerCase() === "completed" && !hasTriggeredCompletedAlert) {
             triggerCompletedEffects();
+            if (updatedOrder.table_no) {
+              localStorage.setItem(`pos_table_lock_${updatedOrder.table_no}`, "SETTLED");
+            }
           }
         }
       )
@@ -294,6 +298,7 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
   }
 
   const normalizedStatus = (order.status || "").toLowerCase();
+  const isCompleted = normalizedStatus === "completed";
   const steps = ["pending", "preparing", "ready", "completed"];
   const currentStepIdx = steps.indexOf(normalizedStatus);
 
@@ -528,7 +533,7 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
         </div>
 
         {/* Play While You Wait (Brick Breaker) */}
-        <div className="border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-purple-50/50 to-pink-50/70 shadow-md shadow-indigo-100 rounded-3xl p-1 mb-8 overflow-hidden">
+        <div className="border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-purple-50/50 to-pink-50/70 shadow-md shadow-indigo-100 rounded-3xl p-1 mb-8 overflow-hidden touch-pan-y" style={{ touchAction: 'pan-y' }}>
           <button
             onClick={() => setShowGame(!showGame)}
             className="w-full flex items-center justify-between p-4 hover:bg-white/50 transition-colors rounded-2xl"
@@ -558,12 +563,18 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
           )}
         </div>
 
-        <Link
-          href={`/menu?table=${order.table_no}`}
-          className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-slate-900/20"
-        >
-          <UtensilsCrossed className="w-5 h-5" /> Order More Items
-        </Link>
+        {!isCompleted ? (
+          <Link
+            href={`/menu?table=${order.table_no}`}
+            className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-slate-900/20"
+          >
+            <UtensilsCrossed className="w-5 h-5" /> Order More Items
+          </Link>
+        ) : (
+          <div className="w-full text-center py-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 font-bold text-sm">
+            🎉 Order Settled & Completed. Thank you!
+          </div>
+        )}
       </main>
 
       {/* Full Screen Ready Modal */}
@@ -601,10 +612,16 @@ export default function OrderTracking({ params }: { params: Promise<{ id: string
               Thank you for dining with us. Hope you enjoyed your meal!
             </p>
             <button
-              onClick={() => setShowCompletedModal(false)}
+              onClick={() => {
+                setShowCompletedModal(false);
+                if (order?.table_no) {
+                  localStorage.setItem(`pos_table_lock_${order.table_no}`, "SETTLED");
+                }
+                window.location.href = `/menu?table=${order?.table_no || 1}`;
+              }}
               className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-emerald-500/30"
             >
-              View Receipt Summary
+              Finish & Return Home
             </button>
           </div>
         </div>

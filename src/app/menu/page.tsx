@@ -32,8 +32,8 @@ function MenuContent() {
   const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
   const urlTableNumber = searchParams.get("table");
-  const urlMode = searchParams.get("mode"); // e.g. mode=tablet to bypass locks
-  const urlScanToken = searchParams.get("t"); // Dynamic fresh QR scan token if available
+  const urlMode = searchParams.get("mode");
+  const urlScanToken = searchParams.get("t");
 
   const [tableNumber, setTableNumber] = useState("");
   const [isTableSelectorOpen, setIsTableSelectorOpen] = useState(false);
@@ -47,7 +47,7 @@ function MenuContent() {
   const { isAuthenticated } = useAuth();
   const { settings } = useSettings();
 
-  // Staff or in-house restaurant tablet bypass
+  // Staff or in-house tablet bypass
   const isBypassMode = Boolean(isAuthenticated || urlMode === "tablet");
 
   const [activeCategory, setActiveCategory] = useState("All");
@@ -96,54 +96,54 @@ function MenuContent() {
     setTableNumber(activeTable);
     localStorage.setItem("active_table", activeTable);
 
-    const lockKey = `pos_table_lock_${activeTable}`;
     const sessionKey = `pos_table_session_${activeTable}`;
-    const lastScanTokenKey = `pos_table_token_${activeTable}`;
+    const tokenKey = `pos_table_token_${activeTable}`;
 
-    // If an explicit scan token is in URL and it is new, reset old locks
-    if (urlScanToken && localStorage.getItem(lastScanTokenKey) !== urlScanToken) {
-      localStorage.removeItem(lockKey);
-      localStorage.removeItem(sessionKey);
-      localStorage.setItem(lastScanTokenKey, urlScanToken);
+    // Fresh Scan Token detection or first visit
+    if (urlScanToken) {
+      const storedToken = localStorage.getItem(tokenKey);
+      if (storedToken !== urlScanToken) {
+        // Brand new QR scan: Reset previous lockouts and begin fresh session
+        localStorage.setItem(tokenKey, urlScanToken);
+        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
+        setIsBillSettled(false);
+        setIsSessionExpired(false);
+      }
     }
 
-    const isLocked = localStorage.getItem(lockKey);
-    if (isLocked === "SETTLED") {
-      setIsBillSettled(true);
-      return;
-    } else if (isLocked === "EXPIRED") {
-      setIsSessionExpired(true);
-      setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
-      return;
-    }
-
+    // Evaluate existing session time window
     const storedSession = localStorage.getItem(sessionKey);
     if (storedSession) {
       try {
         const parsed = JSON.parse(storedSession);
         const elapsed = Date.now() - parsed.startTime;
+
+        if (parsed.settled) {
+          setIsBillSettled(true);
+          return;
+        }
+
         if (elapsed > SESSION_TIMEOUT_MS) {
           setIsSessionExpired(true);
-          localStorage.setItem(lockKey, "EXPIRED");
           setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
         }
       } catch (e) {
-        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now() }));
+        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
       }
     } else {
-      localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now() }));
+      localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
     }
   }, [mounted, urlTableNumber, urlScanToken, isBypassMode]);
 
-  // 2. Initial Database Verification for Active vs Settled
+  // 2. Database Sync: Ensure settled state or allow new guest if settled long ago
   useEffect(() => {
     if (!mounted || !tableNumber || isBypassMode) return;
 
-    const verifyTableStatus = async () => {
+    const verifyDatabaseState = async () => {
       try {
         const { data, error } = await supabase
           .from("orders")
-          .select("id, status, created_at")
+          .select("id, status, created_at, updated_at")
           .eq("table_no", tableNumber)
           .order("created_at", { ascending: false })
           .limit(1);
@@ -151,33 +151,38 @@ function MenuContent() {
         if (!error && data && data.length > 0) {
           const latestOrder = data[0];
           const status = String(latestOrder.status).toLowerCase();
-          const lockKey = `pos_table_lock_${tableNumber}`;
           const sessionKey = `pos_table_session_${tableNumber}`;
+          const stored = localStorage.getItem(sessionKey);
+          const parsed = stored ? JSON.parse(stored) : null;
 
-          // Check if order was completed long ago (e.g., more than 40 mins ago), if so unlock for next customer
-          const orderAge = Date.now() - new Date(latestOrder.created_at).getTime();
-          if (status === "completed" && orderAge > 40 * 60 * 1000) {
-            localStorage.removeItem(lockKey);
-            localStorage.removeItem(sessionKey);
-            setIsBillSettled(false);
-            setIsSessionExpired(false);
-          } else if (status === "completed" && localStorage.getItem(lockKey) === "SETTLED") {
-            setIsBillSettled(true);
+          if (status === "completed") {
+            const orderTime = new Date(latestOrder.updated_at || latestOrder.created_at).getTime();
+
+            // If the settlement occurred during this active customer's session, lock them out
+            if (parsed && parsed.startTime && orderTime >= parsed.startTime) {
+              setIsBillSettled(true);
+              setIsCartOpen(false);
+              setCart([]);
+              parsed.settled = true;
+              localStorage.setItem(sessionKey, JSON.stringify(parsed));
+            } else if (!urlTableNumber && parsed?.settled) {
+              setIsBillSettled(true);
+            }
           }
         }
       } catch (e) {
-        console.warn("Table verification error", e);
+        console.warn("Table state sync check failed", e);
       }
     };
 
-    verifyTableStatus();
-  }, [mounted, tableNumber, isBypassMode]);
+    verifyDatabaseState();
+  }, [mounted, tableNumber, isBypassMode, urlTableNumber]);
 
-  // 3. Realtime Bill Settlement Listener
+  // 3. Realtime Supabase Bill Settlement Listener
   useEffect(() => {
     if (!mounted || !tableNumber || isBypassMode) return;
 
-    const channelName = `customer_menu_settlement_${tableNumber}_${Date.now()}`;
+    const channelName = `customer_settlement_listener_${tableNumber}_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
       .on(
@@ -195,7 +200,16 @@ function MenuContent() {
               setIsBillSettled(true);
               setIsCartOpen(false);
               setCart([]);
-              localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
+
+              const sessionKey = `pos_table_session_${tableNumber}`;
+              const stored = localStorage.getItem(sessionKey);
+              if (stored) {
+                try {
+                  const parsed = JSON.parse(stored);
+                  parsed.settled = true;
+                  localStorage.setItem(sessionKey, JSON.stringify(parsed));
+                } catch (e) { }
+              }
             }
           }
         }
@@ -207,24 +221,22 @@ function MenuContent() {
     };
   }, [mounted, tableNumber, isBypassMode]);
 
-  // 4. Periodic 30-Min Expiry Check
+  // 4. Periodic 30-Minute Timeout Check
   useEffect(() => {
     if (!mounted || !tableNumber || isBypassMode) return;
 
     const interval = setInterval(() => {
       const sessionKey = `pos_table_session_${tableNumber}`;
-      const lockKey = `pos_table_lock_${tableNumber}`;
       const stored = localStorage.getItem(sessionKey);
 
-      if (stored && localStorage.getItem(lockKey) !== "EXPIRED") {
+      if (stored) {
         try {
           const parsed = JSON.parse(stored);
           const elapsed = Date.now() - parsed.startTime;
-          if (elapsed > SESSION_TIMEOUT_MS) {
+          if (elapsed > SESSION_TIMEOUT_MS && !isSessionExpired && !isBillSettled) {
             setIsSessionExpired(true);
             setIsCartOpen(false);
             setCart([]);
-            localStorage.setItem(lockKey, "EXPIRED");
             setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
           }
         } catch (e) { }
@@ -232,9 +244,9 @@ function MenuContent() {
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [mounted, tableNumber, isBypassMode]);
+  }, [mounted, tableNumber, isBypassMode, isSessionExpired, isBillSettled]);
 
-  // 5. Fetch Menu Items
+  // 5. Fetch Active Menu Items
   useEffect(() => {
     if (!mounted) return;
     let isMounted = true;
@@ -259,7 +271,7 @@ function MenuContent() {
     fetchMenu();
 
     const channel = supabase
-      .channel("public:menu_items:menu_cache_live")
+      .channel("public:menu_items:live_menu")
       .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
         fetchMenu();
       })
@@ -271,7 +283,7 @@ function MenuContent() {
     };
   }, [mounted]);
 
-  // Modal scroll lock
+  // Modal background scroll lock
   const isAnyModalOpen = Boolean(
     isCartOpen || isReviewModalOpen || isTableSelectorOpen ||
     (!isBypassMode && (isSessionExpired || isBillSettled || noQrDetected))
@@ -581,7 +593,7 @@ function MenuContent() {
     if (!isReviewModalOpen) return null;
     return (
       <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div className="bg-white rounded-3xl w-full max-w-sm p-4 sm:p-6 shadow-2xl relative animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto no-scrollbar">
+        <div className="bg-white rounded-3xl w-full max-w-sm p-4 sm:p-5 shadow-2xl relative animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto no-scrollbar">
           <button
             onClick={() => setIsReviewModalOpen(false)}
             className="absolute top-3.5 right-3.5 w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition-colors"
@@ -589,19 +601,19 @@ function MenuContent() {
             <X className="w-4 h-4" />
           </button>
 
-          <div className="text-center mb-3">
-            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-1.5 text-amber-600">
-              <Star className="w-5 h-5 fill-amber-500 text-amber-500" />
+          <div className="text-center mb-2.5">
+            <div className="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-1 text-amber-600">
+              <Star className="w-4 h-4 fill-amber-500 text-amber-500" />
             </div>
-            <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">Rate Your Experience</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">Table {tableNumber ? tableNumber.padStart(2, '0') : ''} • Help us improve!</p>
+            <h3 className="text-base font-bold text-slate-900 leading-tight">Rate Experience</h3>
+            <p className="text-[10px] text-slate-500 mt-0.5">Table {tableNumber ? tableNumber.padStart(2, '0') : ''} • Help us serve you better!</p>
           </div>
 
-          <form onSubmit={handleReviewSubmit} className="space-y-3">
+          <form onSubmit={handleReviewSubmit} className="space-y-2.5">
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
               <div className="flex justify-between items-center mb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">🍲 Food Quality</span>
-                <span className="text-[11px] font-bold text-amber-600">{foodRating}/5</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">🍲 Food Quality</span>
+                <span className="text-[10px] font-bold text-amber-600">{foodRating}/5</span>
               </div>
               <div className="flex gap-1.5 justify-center py-0.5">
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -612,7 +624,7 @@ function MenuContent() {
                     className="p-1 transition-transform hover:scale-110 active:scale-95"
                   >
                     <Star
-                      className={`w-6 h-6 ${star <= foodRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                      className={`w-5 h-5 ${star <= foodRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
                     />
                   </button>
                 ))}
@@ -621,8 +633,8 @@ function MenuContent() {
 
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
               <div className="flex justify-between items-center mb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">🤵 Waiter & Service</span>
-                <span className="text-[11px] font-bold text-amber-600">{serviceRating}/5</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">🤵 Waiter & Service</span>
+                <span className="text-[10px] font-bold text-amber-600">{serviceRating}/5</span>
               </div>
               <div className="flex gap-1.5 justify-center py-0.5">
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -633,7 +645,7 @@ function MenuContent() {
                     className="p-1 transition-transform hover:scale-110 active:scale-95"
                   >
                     <Star
-                      className={`w-6 h-6 ${star <= serviceRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                      className={`w-5 h-5 ${star <= serviceRating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
                     />
                   </button>
                 ))}
@@ -642,7 +654,7 @@ function MenuContent() {
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Waiter Name</label>
+                <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Waiter Name</label>
                 <input
                   type="text"
                   value={waiterName}
@@ -652,7 +664,7 @@ function MenuContent() {
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Your Name</label>
+                <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Your Name</label>
                 <input
                   type="text"
                   value={reviewerName}
@@ -664,11 +676,11 @@ function MenuContent() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Comments</label>
+              <label className="block text-[9px] font-bold text-slate-600 mb-0.5 uppercase tracking-wider">Comments</label>
               <textarea
                 value={reviewComment}
                 onChange={(e) => setReviewComment(e.target.value)}
-                placeholder="Tell us what you loved or how we can improve..."
+                placeholder="Share your thoughts..."
                 rows={2}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-medium text-slate-800 outline-none focus:border-amber-400"
               />
@@ -677,7 +689,7 @@ function MenuContent() {
             <button
               type="submit"
               disabled={isSubmittingReview}
-              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-xl text-sm shadow-md shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               {isSubmittingReview ? "Submitting..." : "Submit Review ⭐"}
             </button>
@@ -714,7 +726,7 @@ function MenuContent() {
     );
   }
 
-  // 2. Bill Settled View (Persistent across reloads)
+  // 2. Bill Settled View (Persistent across reloads during active session)
   if (!isBypassMode && isBillSettled) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
@@ -850,7 +862,7 @@ function MenuContent() {
     );
   }
 
-  // 5. Active Browsable Menu
+  // 5. Active Browsable Menu View
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pt-16 md:pt-[72px] pb-32 font-sans selection:bg-orange-500/30">
       {isAuthenticated ? (
