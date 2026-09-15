@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import MenuItemCard, { MenuItem as CardMenuItem } from "@/components/MenuItemCard";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import PaymentModal from "@/components/PaymentModal";
 import { useSettings } from "@/context/SettingsContext";
 
 type OrderItem = {
@@ -1668,206 +1669,22 @@ export default function CashierPage() {
         </div>
 
         {/* Payment Modal */}
-        {(paymentModalOrderId || stagedDirectOrder) && (
-          <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 no-print"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                setPaymentModalOrderId(null);
-                setStagedDirectOrder(null);
-                setShowSplitPayment(false);
-                setSplitCashAmount("");
-                setShowCashCalculator(false);
-                setCashGiven("");
-              }
-            }}
-          >
-            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                <h2 className="text-xl font-bold text-slate-900">Select Payment</h2>
-                <button
-                  onClick={() => {
-                    setPaymentModalOrderId(null);
-                    setStagedDirectOrder(null);
-                    setShowSplitPayment(false);
-                    setSplitCashAmount("");
-                    setShowCashCalculator(false);
-                    setCashGiven("");
-                  }}
-                  className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div className="text-center mb-6">
-                  <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Amount Due</p>
-                  <p className="text-3xl font-bold text-slate-900">{currencySymbol} {(stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                </div>
-
-                {!showSplitPayment && !showCashCalculator ? (
-                  <>
-                    <button
-                      onClick={() => setShowCashCalculator(true)}
-                      className="w-full py-4 bg-white border-2 border-orange-200 hover:border-orange-500 hover:bg-orange-50 rounded-2xl flex items-center justify-center gap-3 transition-colors shadow-sm"
-                    >
-                      <span className="text-2xl">💵</span>
-                      <span className="font-bold text-lg text-slate-800">Cash Full</span>
-                    </button>
-                    <button
-                      onClick={() => handleSettlePayment("Card")}
-                      className="w-full py-4 bg-white border-2 border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50 rounded-2xl flex items-center justify-center gap-3 transition-colors shadow-sm"
-                    >
-                      <span className="text-2xl">💳</span>
-                      <span className="font-bold text-lg text-slate-800">Card Full</span>
-                    </button>
-                    <button
-                      onClick={() => setShowSplitPayment(true)}
-                      className="w-full py-4 bg-slate-50 border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 rounded-2xl flex items-center justify-center gap-3 transition-colors shadow-sm mt-2"
-                    >
-                      <span className="text-2xl">🍕</span>
-                      <span className="font-bold text-lg text-slate-800">Split Payment</span>
-                    </button>
-                  </>
-                ) : showCashCalculator ? (
-                  <form
-                    className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (isSubmitting || (cashGiven !== "" && Number(cashGiven || 0) < (stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal))) return;
-                      handleSettlePayment("Cash");
-                    }}
-                  >
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Cash Tendered / Customer Paid</label>
-                      <input
-                        type="number"
-                        placeholder="Enter amount received"
-                        value={cashGiven}
-                        onChange={(e) => setCashGiven(e.target.value)}
-                        className="w-full bg-white border-2 border-slate-200 rounded-xl p-3 font-bold text-slate-900 focus:border-orange-500 outline-none text-center text-lg shadow-sm"
-                        autoFocus
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button type="button" onClick={() => setCashGiven(String(stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal))} className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-bold text-slate-700">Exact</button>
-                      <button type="button" onClick={() => setCashGiven(String(Math.ceil((stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal) / 500) * 500))} className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-bold text-slate-700">Nearest 500</button>
-                      <button type="button" onClick={() => setCashGiven("1000")} className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-bold text-slate-700">1,000</button>
-                      <button type="button" onClick={() => setCashGiven("5000")} className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-bold text-slate-700">5,000</button>
-                    </div>
-
-                    <div className="p-4 rounded-xl border flex flex-col justify-center items-center">
-                      {Number(cashGiven || 0) >= (stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal) ? (
-                        <div className="text-center text-emerald-600 bg-emerald-50 w-full p-2 rounded-lg border border-emerald-100">
-                          <span className="block text-xs font-bold uppercase tracking-widest mb-1">Change to Return</span>
-                          <span className="font-bold text-2xl">{currencySymbol} {(Number(cashGiven) - (stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      ) : (
-                        <div className="text-center text-rose-500 bg-rose-50 w-full p-2 rounded-lg border border-rose-100">
-                          <span className="block text-xs font-bold uppercase tracking-widest mb-1">Remaining Due</span>
-                          <span className="font-bold text-2xl">{currencySymbol} {((stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal) - Number(cashGiven || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isSubmitting || (cashGiven !== "" && Number(cashGiven || 0) < (stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal))}
-                      className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold rounded-2xl transition-all shadow-md active:scale-95 flex justify-center items-center gap-2"
-                    >
-                      {isSubmitting ? "Processing..." : "Confirm Settle Cash"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowCashCalculator(false); setCashGiven(""); }}
-                      className="w-full py-2 text-slate-500 hover:text-slate-700 font-bold text-sm"
-                    >
-                      Back to Options
-                    </button>
-                  </form>
-                ) : (
-                  <form
-                    className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const amountDue = stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal;
-                      const cashAmt = Number(splitCashAmount || 0);
-                      const cardAmt = Math.max(0, amountDue - cashAmt);
-                      const cashExceedsTotal = splitCashAmount !== "" && cashAmt >= amountDue;
-                      const isInvalid = !splitCashAmount || isNaN(cashAmt) || cashAmt <= 0 || cashExceedsTotal;
-
-                      if (!isInvalid && !isSubmitting) {
-                        handleSettlePayment(`Split (Cash: ${cashAmt}, Card: ${cardAmt})`);
-                      }
-                    }}
-                  >
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Cash Amount Received</label>
-                      <input
-                        type="number"
-                        placeholder="Amount in Cash"
-                        value={splitCashAmount}
-                        onChange={(e) => setSplitCashAmount(e.target.value)}
-                        className="w-full bg-white border-2 border-slate-200 rounded-xl p-3 font-bold text-slate-900 focus:border-orange-500 outline-none text-center text-lg shadow-sm"
-                        autoFocus
-                      />
-                    </div>
-
-                    {(() => {
-                      const amountDue = stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal;
-                      const cashAmt = Number(splitCashAmount || 0);
-                      const cardAmt = Math.max(0, amountDue - cashAmt);
-                      const cashExceedsTotal = splitCashAmount !== "" && cashAmt >= amountDue;
-                      const splitMismatch = splitCashAmount !== "" && cashAmt > 0 && cashAmt < amountDue && (cashAmt + cardAmt) !== amountDue;
-                      const isInvalid = !splitCashAmount || isNaN(cashAmt) || cashAmt <= 0 || cashExceedsTotal;
-
-                      return (
-                        <>
-                          <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex justify-between items-center text-indigo-900">
-                            <span className="font-bold">Card Amount:</span>
-                            <span className={`font-bold text-xl ${cashExceedsTotal ? "text-rose-500 line-through" : ""}`}>
-                              {currencySymbol} {cardAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                          </div>
-
-                          {cashExceedsTotal && (
-                            <div className="text-center text-xs font-bold text-rose-500 bg-rose-50 p-3 rounded-xl border border-rose-100 animate-in slide-in-from-top-1">
-                              ⚠️ Cash amount cannot exceed total amount due in split payment. Use full cash payment instead.
-                            </div>
-                          )}
-
-                          {splitMismatch && (
-                            <div className="text-center text-xs font-bold text-amber-600 bg-amber-50 p-3 rounded-xl border border-amber-100 animate-in slide-in-from-top-1">
-                              ⚠️ Cash + Card must equal exactly {currencySymbol} {amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </div>
-                          )}
-
-                          <button
-                            type="submit"
-                            disabled={isInvalid || isSubmitting}
-                            className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold rounded-2xl transition-all shadow-md active:scale-95"
-                          >
-                            {isSubmitting ? "Processing..." : "Confirm Split Payment"}
-                          </button>
-                        </>
-                      );
-                    })()}
-
-                    <button
-                      type="button"
-                      onClick={() => setShowSplitPayment(false)}
-                      className="w-full py-2 text-slate-500 hover:text-slate-700 font-bold text-sm"
-                    >
-                      Back to Options
-                    </button>
-                  </form>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <PaymentModal
+          isOpen={!!(paymentModalOrderId || stagedDirectOrder)}
+          onClose={() => {
+            setPaymentModalOrderId(null);
+            setStagedDirectOrder(null);
+            setShowSplitPayment(false);
+            setSplitCashAmount("");
+            setShowCashCalculator(false);
+            setCashGiven("");
+          }}
+          totalAmount={stagedDirectOrder ? stagedDirectOrder.total_amount : finalGrandTotal}
+          currencySymbol={currencySymbol}
+          orderType={stagedDirectOrder ? stagedDirectOrder.order_type : selectedOrder?.order_type}
+          onConfirmPayment={handleSettlePayment}
+          isSubmitting={isSubmitting}
+        />
 
         {/* Recent Bills Modal */}
         {showRecentBills && (
