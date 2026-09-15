@@ -87,7 +87,7 @@ export default function CashierPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Dynamic tables state with immediate localStorage cache to prevent table flicker
+  // Dynamic tables state with immediate localStorage cache to prevent 8-table flicker
   const [dbTables, setDbTables] = useState<any[]>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -116,7 +116,7 @@ export default function CashierPage() {
   // Dynamic Fast Moving Item IDs based on historical completed sales
   const [fastMovingItemIds, setFastMovingItemIds] = useState<string[]>([]);
 
-  // Fetch top sold items in the background on mount (prevents modal lag on F12)
+  // Fetch actual top sold items from completed orders
   useEffect(() => {
     const fetchTopSellingItems = async () => {
       try {
@@ -142,6 +142,7 @@ export default function CashierPage() {
             }
           });
 
+          // Sort by top sold
           const sortedNames = Array.from(itemSalesMap.entries())
             .sort((a, b) => b[1] - a[1])
             .slice(0, 15)
@@ -154,8 +155,10 @@ export default function CashierPage() {
       }
     };
 
-    fetchTopSellingItems();
-  }, []);
+    if (isModalOpen) {
+      fetchTopSellingItems();
+    }
+  }, [isModalOpen]);
 
   // Favorites state persisted in localStorage
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
@@ -594,19 +597,7 @@ export default function CashierPage() {
             setPrintMetadata(null);
           });
         } else {
-          // Dine-in: silent settlement, drawer pulse on cash or split payment
-          if (paymentMethod === "Cash" || paymentMethod?.startsWith("Split")) {
-            triggerSafePrint({
-              ...orderToUpdate,
-              items: [],
-            } as any, false, () => {
-              cleanup();
-              setPrintMetadata(null);
-            });
-          } else {
-            cleanup();
-            setPrintMetadata(null);
-          }
+          cleanup();
         }
 
         triggerPaymentSuccess(
@@ -698,9 +689,8 @@ export default function CashierPage() {
         const baseNotes = stagedDirectOrder.special_notes || '';
         const newNotes = (method === "Cash" || passedTendered) ? `[Paid Cash: ${tenderedAmt} | Change: ${changeAmt}] ${baseNotes}`.trim() : baseNotes;
 
-        const isDineIn = stagedDirectOrder.order_type === 'dine-in';
         const payload = {
-          table_no: isDineIn ? String(stagedDirectOrder.table_no || '1') : '0',
+          table_no: stagedDirectOrder.order_type === 'dine-in' ? String(stagedDirectOrder.table_no || '1') : '0',
           order_type: stagedDirectOrder.order_type || 'takeaway',
           customer_name: stagedDirectOrder.customer_name?.trim() || null,
           items: stagedDirectOrder.items.map((item: any) => ({
@@ -737,18 +727,6 @@ export default function CashierPage() {
               setPrintMetadata(null);
             };
             triggerSafePrint(insertedOrder, false, cleanup);
-          } else {
-            // Dine-in direct settle: silent pulse on cash/split
-            if (method === "Cash" || method?.startsWith("Split")) {
-              triggerSafePrint({
-                ...insertedOrder,
-                items: [],
-              } as any, false, () => {
-                setPrintMetadata(null);
-              });
-            } else {
-              setPrintMetadata(null);
-            }
           }
 
           triggerPaymentSuccess(
@@ -1900,7 +1878,7 @@ export default function CashierPage() {
                 <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
 
-              {/* 1. Categories Sidebar */}
+              {/* 1. Categories Sidebar: Perfectly scrollable on desktop & mobile */}
               <div className="w-full lg:w-48 xl:w-56 bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 min-h-0">
                 <div className="hidden lg:block p-4 border-b border-slate-200/80 bg-white shrink-0">
                   <span className="text-xs font-black uppercase tracking-wider text-slate-400">Categories</span>
@@ -1996,6 +1974,7 @@ export default function CashierPage() {
               <div className={`w-full lg:w-[380px] xl:w-[420px] bg-white flex flex-col relative shrink-0 min-h-0 overflow-hidden ${isMobileCartExpanded ? 'fixed inset-0 z-50 h-full' : 'hidden lg:flex'
                 }`}>
 
+                {/* Header with Mobile Close button */}
                 <div className="p-4 border-b border-slate-100 bg-slate-50 shrink-0 flex justify-between items-center">
                   <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <ShoppingBag className="w-4 h-4 text-orange-500" /> Order Details
