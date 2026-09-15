@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useSettings } from "@/context/SettingsContext";
 import {
   UtensilsCrossed, Settings as SettingsIcon, Plus, Check, Search,
   Pencil, Trash2, X, Leaf, Flame, Image as ImageIcon, Lock, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, Tag
+  ChevronLeft, ChevronRight, ArrowLeft, Tag, QrCode
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -404,7 +405,7 @@ export default function AdminPage() {
             {/* Top Close (X) Button */}
             <button
               onClick={handleExitPinModal}
-              className="absolute top-5 right-5 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 hover:text-slate-700 transition-colors shadow-sm"
+              className="absolute top-5 right-5 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 hover:text-slate-700 transition-colors shadow-sm cursor-pointer"
               title="Close & Go Back (Esc)"
               aria-label="Close"
             >
@@ -440,14 +441,14 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={handleExitPinModal}
-                  className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-1.5 active:scale-[0.98]"
+                  className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] cursor-pointer"
                 >
                   <ArrowLeft className="w-4 h-4" /> Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!pinInput || isVerifying}
-                  className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all shadow-[0_8px_20px_rgba(15,23,42,0.2)] active:scale-[0.98] text-sm"
+                  className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all shadow-[0_8px_20px_rgba(15,23,42,0.2)] active:scale-[0.98] text-sm cursor-pointer"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : "Unlock"}
                 </button>
@@ -484,21 +485,28 @@ export default function AdminPage() {
               <p className="text-slate-500 font-medium text-xs sm:text-sm mt-1">Configure your menu catalog, tables, and global POS settings.</p>
             </div>
 
-            <div className="flex bg-white rounded-xl p-1 shadow-sm border border-slate-200 w-full sm:w-auto overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-slate-200 w-full sm:w-auto overflow-x-auto no-scrollbar">
               <button
                 onClick={() => setActiveTab("menu")}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${activeTab === "menu" ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${activeTab === "menu" ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'
                   }`}
               >
                 <UtensilsCrossed className="w-4 h-4" /> Menu Catalog
               </button>
               <button
                 onClick={() => setActiveTab("settings")}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${activeTab === "settings" ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${activeTab === "settings" ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'
                   }`}
               >
                 <SettingsIcon className="w-4 h-4" /> General Settings
               </button>
+
+              <Link
+                href="/admin/qr-generator"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-xs sm:text-sm font-bold text-slate-600 hover:text-orange-600 hover:bg-orange-50 transition-all whitespace-nowrap border-l border-slate-200"
+              >
+                <QrCode className="w-4 h-4 text-orange-500" /> Table QRs
+              </Link>
             </div>
           </div>
 
@@ -510,7 +518,7 @@ export default function AdminPage() {
                     <h2 className="text-base sm:text-lg font-bold text-slate-800">Menu Catalog</h2>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">Manage your dishes, categories, and availability.</p>
                   </div>
-                  <button onClick={openAddModal} className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2">
+                  <button onClick={openAddModal} className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer">
                     <Plus className="w-4 h-4" /> Add Dish
                   </button>
                 </div>
@@ -523,7 +531,7 @@ export default function AdminPage() {
                         const el = document.getElementById("admin-cat-scroll");
                         if (el) el.scrollBy({ left: -200, behavior: "smooth" });
                       }}
-                      className="shrink-0 mr-1 p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors shadow-sm active:scale-95 z-10"
+                      className="shrink-0 mr-1 p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors shadow-sm active:scale-95 z-10 cursor-pointer"
                       title="Scroll Left"
                     >
                       <ChevronLeft className="w-4 h-4" />
@@ -554,7 +562,7 @@ export default function AdminPage() {
                         const el = document.getElementById("admin-cat-scroll");
                         if (el) el.scrollBy({ left: 200, behavior: "smooth" });
                       }}
-                      className="shrink-0 ml-1 p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors shadow-sm active:scale-95 z-10"
+                      className="shrink-0 ml-1 p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors shadow-sm active:scale-95 z-10 cursor-pointer"
                       title="Scroll Right"
                     >
                       <ChevronRight className="w-4 h-4" />
@@ -631,16 +639,16 @@ export default function AdminPage() {
                             <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                               <button
                                 onClick={() => toggleAvailability(item)}
-                                className={`text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${isAvailable ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                className={`text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${isAvailable ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                   }`}
                               >
                                 {isAvailable ? "In Stock" : "Sold Out"}
                               </button>
                               <div className="flex gap-1">
-                                <button onClick={() => openEditModal(item)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Edit">
+                                <button onClick={() => openEditModal(item)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer" title="Edit">
                                   <Pencil className="w-4 h-4" />
                                 </button>
-                                <button onClick={() => handleDelete(item)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                                <button onClick={() => handleDelete(item)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer" title="Delete">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -753,7 +761,7 @@ export default function AdminPage() {
                   <button
                     onClick={handleSaveSettings}
                     disabled={isSaving}
-                    className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 sm:py-4 rounded-xl shadow-md transition-all flex justify-center items-center gap-2 disabled:opacity-50 text-xs sm:text-sm active:scale-[0.99]"
+                    className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 sm:py-4 rounded-xl shadow-md transition-all flex justify-center items-center gap-2 disabled:opacity-50 text-xs sm:text-sm active:scale-[0.99] cursor-pointer"
                   >
                     {isSaving ? <span className="animate-pulse">Saving...</span> : <><Check className="w-5 h-5" /> Save Configuration</>}
                   </button>
@@ -780,7 +788,7 @@ export default function AdminPage() {
           <div className="bg-white w-full max-w-2xl rounded-t-[2rem] sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
             <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
               <h2 className="text-base sm:text-xl font-bold text-slate-900">{editingItem ? "Edit Dish" : "Add New Dish"}</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-200 rounded-full">
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-200 rounded-full cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -799,7 +807,6 @@ export default function AdminPage() {
                   />
                 </div>
 
-                {/* Category Selection with Instant + New Category Option */}
                 <div>
                   <div className="flex justify-between items-center mb-2">
                     <label className="block text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -811,7 +818,7 @@ export default function AdminPage() {
                         setIsCreatingNewCategory(!isCreatingNewCategory);
                         setNewCategoryInput("");
                       }}
-                      className="text-[11px] font-bold text-orange-600 hover:text-orange-700 transition-colors flex items-center gap-1"
+                      className="text-[11px] font-bold text-orange-600 hover:text-orange-700 transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       {isCreatingNewCategory ? "← Choose Existing" : "+ New Category"}
                     </button>
@@ -930,10 +937,10 @@ export default function AdminPage() {
             </div>
 
             <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 sm:gap-3 shrink-0">
-              <button onClick={() => setIsModalOpen(false)} className="px-4 sm:px-6 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-slate-600 hover:bg-slate-200 transition-colors">
+              <button onClick={() => setIsModalOpen(false)} className="px-4 sm:px-6 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer">
                 Cancel
               </button>
-              <button onClick={handleSaveMenu} disabled={isSaving} className="bg-orange-500 hover:bg-orange-600 text-white px-6 sm:px-8 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-orange-500/20 transition-all disabled:opacity-50 flex items-center gap-2">
+              <button onClick={handleSaveMenu} disabled={isSaving} className="bg-orange-500 hover:bg-orange-600 text-white px-6 sm:px-8 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-orange-500/20 transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer">
                 {isSaving ? "Saving..." : <><Check className="w-4 h-4" /> Save Dish</>}
               </button>
             </div>
