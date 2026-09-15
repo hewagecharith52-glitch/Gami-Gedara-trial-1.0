@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, CheckCircle, ArrowLeft } from "lucide-react";
 
 interface PaymentModalProps {
@@ -30,6 +30,15 @@ export default function PaymentModal({
     const [cashGiven, setCashGiven] = useState("");
     const [splitCashAmount, setSplitCashAmount] = useState("");
 
+    // Modal එක Open වන වාරයක් පාතා ප්‍රධාන Menu එකට (options) Reset වීම
+    useEffect(() => {
+        if (isOpen) {
+            setViewMode("options");
+            setCashGiven("");
+            setSplitCashAmount("");
+        }
+    }, [isOpen]);
+
     if (!isOpen) return null;
 
     const handleReset = () => {
@@ -45,6 +54,10 @@ export default function PaymentModal({
 
     const isDineIn = !orderType || orderType.startsWith("dine-in");
 
+    // Cash validation: දුන් මුදල Total එකට වඩා අඩු නම් Settle වීම වැළැක්වීම
+    const cashNum = Number(cashGiven || 0);
+    const isCashInsufficient = cashGiven !== "" && cashNum < totalAmount;
+
     // Validation logic for Split Payment
     const splitCashNum = Number(splitCashAmount || 0);
     const isSplitCashExceeded = splitCashAmount !== "" && splitCashNum >= totalAmount;
@@ -58,15 +71,15 @@ export default function PaymentModal({
             }}
         >
             <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          20%, 60% { transform: translateX(-6px); }
-          40%, 80% { transform: translateX(6px); }
-        }
-        .animate-shake {
-          animation: shake 0.35s ease-in-out;
-        }
-      `}</style>
+                @keyframes shake {
+                  0%, 100% { transform: translateX(0); }
+                  20%, 60% { transform: translateX(-6px); }
+                  40%, 80% { transform: translateX(6px); }
+                }
+                .animate-shake {
+                  animation: shake 0.35s ease-in-out;
+                }
+            `}</style>
 
             <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
                 {/* Header */}
@@ -94,7 +107,7 @@ export default function PaymentModal({
                         </p>
                     </div>
 
-                    {/* View 1: Main Options with original emojis and badges */}
+                    {/* View 1: Main Options (Cash, Card, Split තෝරන ප්‍රධාන මෙනුව) */}
                     {viewMode === "options" && (
                         <div className="space-y-3">
                             <button
@@ -202,9 +215,9 @@ export default function PaymentModal({
                                         </span>
                                     </div>
                                 ) : (
-                                    <div className="text-center text-slate-500 bg-slate-50 p-2 rounded-lg">
+                                    <div className="text-center text-rose-500 bg-rose-50 p-2 rounded-lg border border-rose-100">
                                         <span className="block text-[10px] font-bold uppercase tracking-wider mb-0.5">Remaining Due</span>
-                                        <span className="font-bold text-lg text-slate-700">
+                                        <span className="font-bold text-lg">
                                             {currencySymbol} {(totalAmount - Number(cashGiven || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
@@ -213,7 +226,7 @@ export default function PaymentModal({
 
                             <button
                                 type="submit"
-                                disabled={isSubmitting || (cashGiven !== "" && Number(cashGiven) < totalAmount)}
+                                disabled={isSubmitting || cashGiven === "" || cashNum < totalAmount}
                                 className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold rounded-2xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-base"
                             >
                                 <CheckCircle className="w-5 h-5" />
@@ -230,7 +243,7 @@ export default function PaymentModal({
                         </form>
                     )}
 
-                    {/* View 3: Split Payment with Red Shake on Exceeding Amount */}
+                    {/* View 3: Split Payment */}
                     {viewMode === "split" && (
                         <form
                             className="space-y-4 animate-in fade-in duration-200"
@@ -251,8 +264,8 @@ export default function PaymentModal({
                                     value={splitCashAmount}
                                     onChange={(e) => setSplitCashAmount(e.target.value)}
                                     className={`w-full rounded-xl p-3 font-black text-slate-900 outline-none text-center text-xl shadow-inner transition-all border-2 ${isSplitCashExceeded
-                                            ? "border-rose-500 bg-rose-50/70 text-rose-700 animate-shake ring-4 ring-rose-500/20"
-                                            : "border-slate-200 bg-slate-50 focus:border-orange-500 focus:bg-white"
+                                        ? "border-rose-500 bg-rose-50/70 text-rose-700 animate-shake ring-4 ring-rose-500/20"
+                                        : "border-slate-200 bg-slate-50 focus:border-orange-500 focus:bg-white"
                                         }`}
                                     autoFocus
                                 />
@@ -276,8 +289,8 @@ export default function PaymentModal({
                                 type="submit"
                                 disabled={isSplitInvalid || isSubmitting}
                                 className={`w-full py-4 font-bold rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-base ${isSplitInvalid
-                                        ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                                        : "bg-emerald-500 hover:bg-emerald-600 text-white active:scale-95 cursor-pointer shadow-emerald-500/20"
+                                    ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                                    : "bg-emerald-500 hover:bg-emerald-600 text-white active:scale-95 cursor-pointer shadow-emerald-500/20"
                                     }`}
                             >
                                 {isSubmitting ? "Processing..." : "Confirm Split & Open Drawer"}

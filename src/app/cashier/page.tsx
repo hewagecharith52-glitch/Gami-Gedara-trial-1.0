@@ -1642,7 +1642,10 @@ export default function CashierPage() {
 
                 {selectedOrder.order_type === 'takeaway' || selectedOrder.order_type === 'delivery' ? (
                   <button
-                    onClick={() => setPaymentModalOrderId(selectedOrder.id)}
+                    onClick={() => {
+                      setPrintMetadata(null);
+                      setPaymentModalOrderId(selectedOrder.id);
+                    }}
                     className="w-full py-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-[0_8px_20px_rgba(249,115,22,0.3)] flex items-center justify-center gap-2 tracking-wide active:scale-95 text-lg"
                   >
                     <CheckCircle className="w-6 h-6" /> ⚡ Settle & Pay
@@ -1656,7 +1659,10 @@ export default function CashierPage() {
                       <Printer className="w-4 h-4" /> 🖨️ Print Customer Bill
                     </button>
                     <button
-                      onClick={() => setPaymentModalOrderId(selectedOrder.id)}
+                      onClick={() => {
+                        setPrintMetadata(null);
+                        setPaymentModalOrderId(selectedOrder.id);
+                      }}
                       className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-all shadow-[0_8px_20px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2 tracking-wide active:scale-95 text-base"
                     >
                       <CheckCircle className="w-5 h-5" /> ✅ Settle & Mark Paid
@@ -2111,6 +2117,7 @@ export default function CashierPage() {
                         const isDineIn = orderType.startsWith('dine-in-');
                         const tableNumber = isDineIn ? orderType.replace('dine-in-', '') : null;
                         const type = isDineIn ? "dine-in" : orderType;
+                        setPrintMetadata(null);
                         setStagedDirectOrder({
                           table_no: tableNumber,
                           items: cart,
