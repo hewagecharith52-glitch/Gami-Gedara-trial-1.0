@@ -3,10 +3,22 @@ import { generateTableToken } from "@/lib/qrSecurity";
 import { supabase } from "@/lib/supabase";
 
 export async function GET(request: Request) {
-    const origin = request.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const { searchParams } = new URL(request.url);
+
+    // 1. Resolve the actual live domain (Query parameter -> Headers -> Env fallback)
+    const queryOrigin = searchParams.get("origin");
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const proto = request.headers.get("x-forwarded-proto") || "https";
+    const headerOrigin = host ? `${proto}://${host}` : null;
+
+    const origin =
+        queryOrigin ||
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        headerOrigin ||
+        "https://gami-gedara-trial-1-0.vercel.app";
 
     try {
-        // 1. Fetch live tables directly from the database table
+        // 2. Fetch live tables directly from the database table
         const { data: dbTables, error } = await supabase
             .from("restaurant_tables")
             .select("*")
@@ -28,7 +40,7 @@ export async function GET(request: Request) {
             tablesList = Array.from({ length: 12 }, (_, i) => String(i + 1));
         }
 
-        // 2. Generate signed token for each table
+        // 3. Generate signed token for each table
         const tables = tablesList.map((tableNo) => {
             const token = generateTableToken(tableNo);
             return {

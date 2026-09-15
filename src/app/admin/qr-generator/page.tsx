@@ -16,7 +16,9 @@ export default function QrGeneratorPage() {
     useEffect(() => {
         const loadQrs = async () => {
             try {
-                const res = await fetch("/api/generate-table-qrs");
+                // Capture the exact browser origin (e.g., https://myrestaurant.com)
+                const liveOrigin = typeof window !== "undefined" ? window.location.origin : "";
+                const res = await fetch(`/api/generate-table-qrs?origin=${encodeURIComponent(liveOrigin)}`);
                 const data = await res.json();
                 setTableQrs(data.tables || []);
             } catch (err) {
