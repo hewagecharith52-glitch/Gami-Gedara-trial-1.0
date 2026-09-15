@@ -26,7 +26,8 @@ type CartItem = {
   cartItemId: string;
 };
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 Minutes
+const SETTLEMENT_LOCK_MS = 40 * 60 * 1000; // 40 Minutes Post-Payment Lock
+const SESSION_TIMEOUT_MS = 40 * 60 * 1000; // 40 Minutes Dining Session Timeout
 
 function MenuContent() {
   const [mounted, setMounted] = useState(false);
@@ -99,13 +100,21 @@ function MenuContent() {
 
     const sessionKey = `pos_table_session_${activeTable}`;
     const tokenKey = `pos_table_token_${activeTable}`;
+    const lockKey = `pos_table_lock_${activeTable}`;
 
-    // Fresh Scan Token detection or first visit
+    // Direct check for OrderTracking settlement lock
+    const existingLock = localStorage.getItem(lockKey);
+    if (existingLock === "SETTLED") {
+      setIsBillSettled(true);
+    }
+
+    // Fresh Scan Token detection
     if (urlScanToken) {
       const storedToken = localStorage.getItem(tokenKey);
       if (storedToken !== urlScanToken) {
         localStorage.setItem(tokenKey, urlScanToken);
         localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
+        localStorage.removeItem(lockKey);
         setIsBillSettled(false);
         setIsSessionExpired(false);
         setReviewSubmitted(false);
@@ -126,7 +135,7 @@ function MenuContent() {
 
         if (elapsed > SESSION_TIMEOUT_MS) {
           setIsSessionExpired(true);
-          setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
+          setSessionExpiryReason("Your 40-minute dining session has expired to prevent accidental orders.");
         }
       } catch (e) {
         localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
@@ -136,7 +145,7 @@ function MenuContent() {
     }
   }, [mounted, urlTableNumber, urlScanToken, isBypassMode]);
 
-  // 2. Database Sync: Ensure settled state or allow new guest if settled long ago
+  // 2. Database Sync: Check latest order status and apply 40-minute settlement lock
   useEffect(() => {
     if (!mounted || !tableNumber || isBypassMode) return;
 
@@ -152,21 +161,28 @@ function MenuContent() {
         if (!error && data && data.length > 0) {
           const latestOrder = data[0];
           const status = String(latestOrder.status).toLowerCase();
-          const sessionKey = `pos_table_session_${tableNumber}`;
-          const stored = localStorage.getItem(sessionKey);
-          const parsed = stored ? JSON.parse(stored) : null;
+          const orderTime = new Date(latestOrder.updated_at || latestOrder.created_at).getTime();
+          const elapsedSinceOrder = Date.now() - orderTime;
 
-          if (status === "completed") {
-            const orderTime = new Date(latestOrder.updated_at || latestOrder.created_at).getTime();
+          if (status === "completed" && elapsedSinceOrder < SETTLEMENT_LOCK_MS) {
+            setIsBillSettled(true);
+            setIsCartOpen(false);
+            setCart([]);
 
-            if (parsed && parsed.startTime && orderTime >= parsed.startTime) {
-              setIsBillSettled(true);
-              setIsCartOpen(false);
-              setCart([]);
-              parsed.settled = true;
-              localStorage.setItem(sessionKey, JSON.stringify(parsed));
-            } else if (!urlTableNumber && parsed?.settled) {
-              setIsBillSettled(true);
+            localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
+            const sessionKey = `pos_table_session_${tableNumber}`;
+            localStorage.setItem(sessionKey, JSON.stringify({ startTime: orderTime, settled: true }));
+          } else if (status === "completed" && elapsedSinceOrder >= SETTLEMENT_LOCK_MS) {
+            // Lock expired after 40 minutes, allow next guest session
+            localStorage.removeItem(`pos_table_lock_${tableNumber}`);
+            const sessionKey = `pos_table_session_${tableNumber}`;
+            const stored = localStorage.getItem(sessionKey);
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              if (parsed.settled) {
+                localStorage.removeItem(sessionKey);
+                setIsBillSettled(false);
+              }
             }
           }
         }
@@ -176,7 +192,7 @@ function MenuContent() {
     };
 
     verifyDatabaseState();
-  }, [mounted, tableNumber, isBypassMode, urlTableNumber]);
+  }, [mounted, tableNumber, isBypassMode]);
 
   // 3. Realtime Supabase Bill Settlement Listener
   useEffect(() => {
@@ -201,15 +217,9 @@ function MenuContent() {
               setIsCartOpen(false);
               setCart([]);
 
+              localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
               const sessionKey = `pos_table_session_${tableNumber}`;
-              const stored = localStorage.getItem(sessionKey);
-              if (stored) {
-                try {
-                  const parsed = JSON.parse(stored);
-                  parsed.settled = true;
-                  localStorage.setItem(sessionKey, JSON.stringify(parsed));
-                } catch (e) { }
-              }
+              localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: true }));
             }
           }
         }
@@ -221,7 +231,7 @@ function MenuContent() {
     };
   }, [mounted, tableNumber, isBypassMode]);
 
-  // 4. Periodic 30-Minute Timeout Check
+  // 4. Periodic 40-Minute Timeout Check
   useEffect(() => {
     if (!mounted || !tableNumber || isBypassMode) return;
 
@@ -237,7 +247,7 @@ function MenuContent() {
             setIsSessionExpired(true);
             setIsCartOpen(false);
             setCart([]);
-            setSessionExpiryReason("Your 30-minute dining session has expired to prevent accidental orders.");
+            setSessionExpiryReason("Your 40-minute dining session has expired to prevent accidental orders.");
           }
         } catch (e) { }
       }
@@ -564,7 +574,7 @@ function MenuContent() {
         showToast("Failed to submit review: " + error.message, "error");
       } else {
         setIsReviewModalOpen(false);
-        setReviewSubmitted(true); // Permanent lock to Thank You view
+        setReviewSubmitted(true);
         setReviewComment("");
         setWaiterName("");
         setReviewerName("");
@@ -589,7 +599,6 @@ function MenuContent() {
       name: `Table ${String(i + 1).padStart(2, "0")}`
     }));
 
-  // Compact, Mobile-Optimized Review Modal
   const renderReviewModal = () => {
     if (!isReviewModalOpen) return null;
     return (
@@ -772,7 +781,7 @@ function MenuContent() {
     );
   }
 
-  // 3. 30-Minute Timeout View (Persistent across reloads)
+  // 3. 40-Minute Timeout View (Persistent across reloads)
   if (!isBypassMode && isSessionExpired) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
@@ -781,7 +790,7 @@ function MenuContent() {
         </div>
         <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Session Expired</h2>
         <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
-          {sessionExpiryReason || "Your 30-minute ordering window has ended to prevent accidental or remote orders."}
+          {sessionExpiryReason || "Your 40-minute ordering window has ended to prevent accidental or remote orders."}
         </p>
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500">
           <p className="font-bold text-slate-700 mb-1">Still at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}?</p>
@@ -1011,7 +1020,7 @@ function MenuContent() {
         )}
       </main>
 
-      {/* Floating Review Button - Repositioned slightly higher (bottom-28) to prevent covering food card prices */}
+      {/* Floating Review Button */}
       <button
         onClick={() => setIsReviewModalOpen(true)}
         className="fixed bottom-28 left-4 sm:bottom-6 sm:left-6 z-40 bg-white text-slate-800 border-2 border-amber-300 hover:border-amber-400 hover:bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl flex items-center gap-2 sm:gap-2.5 transition-all hover:scale-105 active:scale-95 group font-bold text-xs sm:text-sm cursor-pointer"
