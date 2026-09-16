@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, memo } from "react";
 import { Plus, X, Users, Flame, Leaf, Utensils } from "lucide-react";
 
 export interface MenuItem {
@@ -43,12 +43,11 @@ const CATEGORY_IMAGES: Record<string, string> = {
 
 const DEFAULT_FOOD_IMG = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300&q=60&auto=format&fit=crop";
 
-export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart }: MenuItemCardProps) {
+function MenuItemCardComponent({ item, currencySymbol = "LKR", onAddToCart }: MenuItemCardProps) {
     const hasLargeOption = Boolean(item.large_item);
     const [selectedSize, setSelectedSize] = useState<"Regular" | "Large">("Regular");
     const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-    // Modal එක open වන විට Background Scroll lock කිරීම
     useEffect(() => {
         if (isDetailOpen) {
             document.body.style.overflow = "hidden";
@@ -76,7 +75,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
         <>
             <div
                 onClick={() => setIsDetailOpen(true)}
-                className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-sm border border-slate-100 flex flex-col justify-between hover:border-orange-200 transition-all cursor-pointer group [contain:content]"
+                className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-xs border border-slate-100 flex flex-col justify-between hover:border-orange-300 transition-colors cursor-pointer group [content-visibility:auto] [contain-intrinsic-size:180px] transform-gpu"
             >
                 <div>
                     <div className="relative h-24 sm:h-28 w-full rounded-xl overflow-hidden mb-2 bg-slate-100">
@@ -85,16 +84,16 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                             alt={cleanName}
                             loading="lazy"
                             decoding="async"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            className="w-full h-full object-cover transform-gpu group-hover:scale-105 transition-transform duration-200 will-change-transform"
                             onError={(e) => {
                                 e.currentTarget.src = DEFAULT_FOOD_IMG;
                             }}
                         />
-                        <span className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 bg-slate-900/80 text-white text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                        <span className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 bg-slate-900/80 text-white text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md pointer-events-none">
                             ⏱ 15m
                         </span>
 
-                        <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 flex gap-1">
+                        <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 flex gap-1 pointer-events-none">
                             {item.is_veg && (
                                 <span className="bg-emerald-600 text-white text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">
                                     VEG
@@ -123,7 +122,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                 type="button"
                                 onClick={() => setSelectedSize("Regular")}
                                 className={`flex-1 text-[11px] sm:text-xs py-0.5 sm:py-1 rounded-lg font-bold transition-colors ${selectedSize === "Regular"
-                                    ? "bg-white text-orange-600 shadow-sm"
+                                    ? "bg-white text-orange-600 shadow-xs"
                                     : "text-slate-500 hover:text-slate-700"
                                     }`}
                             >
@@ -133,7 +132,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                 type="button"
                                 onClick={() => setSelectedSize("Large")}
                                 className={`flex-1 text-[11px] sm:text-xs py-0.5 sm:py-1 rounded-lg font-bold transition-colors ${selectedSize === "Large"
-                                    ? "bg-white text-orange-600 shadow-sm"
+                                    ? "bg-white text-orange-600 shadow-xs"
                                     : "text-slate-500 hover:text-slate-700"
                                     }`}
                             >
@@ -157,7 +156,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                         <button
                             type="button"
                             onClick={() => onAddToCart(activeItem, selectedSize, currentPrice)}
-                            className="inline-flex items-center justify-center gap-1 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white text-[11px] sm:text-xs font-bold leading-none h-7 sm:h-8 px-2.5 sm:px-3 rounded-full transition shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+                            className="inline-flex items-center justify-center gap-1 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white text-[11px] sm:text-xs font-bold leading-none h-7 sm:h-8 px-2.5 sm:px-3 rounded-full transition-all shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
                         >
                             <Plus className="w-3.5 h-3.5 stroke-[2.8] shrink-0" />
                             <span className="leading-none pt-[1px]">Add</span>
@@ -169,15 +168,14 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
             {/* Product Quick View Modal */}
             {isDetailOpen && (
                 <div
-                    className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
                     onClick={() => setIsDetailOpen(false)}
                 >
                     <div
-                        className="bg-white w-full sm:max-w-sm rounded-t-[2.5rem] sm:rounded-3xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-300 max-h-[88vh] flex flex-col"
+                        className="bg-white w-full sm:max-w-sm rounded-t-[2.5rem] sm:rounded-3xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-200 max-h-[88vh] flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                         style={{ touchAction: 'pan-y' }}
                     >
-                        {/* Image Banner */}
                         <div className="relative h-44 sm:h-48 w-full bg-slate-100 shrink-0">
                             <img
                                 src={displayImage}
@@ -185,6 +183,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                 className="w-full h-full object-cover"
                             />
                             <button
+                                type="button"
                                 onClick={() => setIsDetailOpen(false)}
                                 className="absolute top-3.5 right-3.5 w-8 h-8 rounded-full bg-slate-900/70 hover:bg-slate-900 text-white flex items-center justify-center transition-colors shadow-md cursor-pointer"
                             >
@@ -192,7 +191,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                             </button>
 
                             <div className="absolute bottom-3 left-3 flex gap-1.5">
-                                <span className="bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                <span className="bg-slate-900/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
                                     ⏱ 15m
                                 </span>
                                 {item.is_veg && (
@@ -208,7 +207,6 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                             </div>
                         </div>
 
-                        {/* Modal Body */}
                         <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-3.5 no-scrollbar">
                             <div>
                                 <span className="text-[9px] font-bold uppercase tracking-wider text-orange-500 bg-orange-50 px-2 py-0.5 rounded-md">
@@ -222,7 +220,6 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                 </p>
                             </div>
 
-                            {/* Portion & Includes Info */}
                             <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                                 <div className="flex items-center gap-2">
                                     <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
@@ -246,7 +243,6 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                 </div>
                             </div>
 
-                            {/* Portion Selection */}
                             {hasLargeOption && (
                                 <div>
                                     <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
@@ -280,9 +276,9 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                             )}
                         </div>
 
-                        {/* Modern Full-Width Add Button with High-Contrast Price Badge */}
                         <div className="p-3.5 sm:p-4 bg-white border-t border-slate-100">
                             <button
+                                type="button"
                                 onClick={() => {
                                     onAddToCart(activeItem, selectedSize, currentPrice);
                                     setIsDetailOpen(false);
@@ -295,9 +291,7 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
                                     </div>
                                     <span>Add to Order</span>
                                 </div>
-
-                                {/* කැපී පෙනෙන High-Contrast Price Badge එක */}
-                                <div className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black tracking-wide shadow-sm">
+                                <div className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black tracking-wide shadow-xs">
                                     {currencySymbol} {currentPrice.toLocaleString()}
                                 </div>
                             </button>
@@ -308,3 +302,5 @@ export default function MenuItemCard({ item, currencySymbol = "LKR", onAddToCart
         </>
     );
 }
+
+export default memo(MenuItemCardComponent);

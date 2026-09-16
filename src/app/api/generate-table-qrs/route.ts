@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { generateTableToken } from "@/lib/qrSecurity";
 import { supabase } from "@/lib/supabase";
 
+// Force dynamic so fresh database table counts are always returned immediately
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
 
@@ -27,7 +31,7 @@ export async function GET(request: Request) {
         let tablesList: string[] = [];
 
         if (!error && dbTables && dbTables.length > 0) {
-            // Sort tables in numerical order (Table 1, Table 2, ... Table 10)
+            // Sort tables in numerical order (Table 1, Table 2, ... Table 10, Table 11, Table 12)
             const sorted = [...dbTables].sort((a, b) => {
                 const numA = parseInt(a.table_no, 10);
                 const numB = parseInt(b.table_no, 10);
@@ -50,7 +54,14 @@ export async function GET(request: Request) {
             };
         });
 
-        return NextResponse.json({ tables });
+        return NextResponse.json(
+            { tables },
+            {
+                headers: {
+                    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+                },
+            }
+        );
     } catch (err: any) {
         return NextResponse.json({ error: err.message, tables: [] }, { status: 500 });
     }

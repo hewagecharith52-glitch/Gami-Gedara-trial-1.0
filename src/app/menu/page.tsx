@@ -49,6 +49,19 @@ function MenuContent() {
   const { isAuthenticated } = useAuth();
   const { settings } = useSettings();
 
+  // Dynamic restaurant tables loaded directly from Supabase DB with cache
+  const [dbTables, setDbTables] = useState<any[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("pos_cached_restaurant_tables");
+        if (cached) return JSON.parse(cached);
+      } catch (e) {
+        console.warn("Failed to read cached tables in Menu:", e);
+      }
+    }
+    return [];
+  });
+
   // Staff or in-house tablet bypass
   const isBypassMode = Boolean(isAuthenticated || urlMode === "tablet");
 
@@ -77,6 +90,74 @@ function MenuContent() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Fetch tables directly from restaurant_tables and subscribe to changes
+  useEffect(() => {
+    if (!mounted) return;
+
+    const fetchTables = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("restaurant_tables")
+          .select("*")
+          .order("created_at", { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          const sorted = [...data].sort((a, b) => {
+            const numA = parseInt(a.table_no, 10);
+            const numB = parseInt(b.table_no, 10);
+            if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+            return String(a.table_no).localeCompare(String(b.table_no));
+          });
+
+          const formatted = sorted.map((t: any) => ({
+            id: String(t.table_no),
+            name: `Table ${String(t.table_no).padStart(2, "0")}`,
+            capacity: Number(t.capacity || 4),
+            section: t.floor_area || "Tables"
+          }));
+
+          setDbTables(formatted);
+          if (typeof window !== "undefined") {
+            localStorage.setItem("pos_cached_restaurant_tables", JSON.stringify(formatted));
+          }
+        }
+      } catch (err) {
+        console.warn("Error fetching tables in MenuPage:", err);
+      }
+    };
+
+    fetchTables();
+
+    const channel = supabase
+      .channel("menu_restaurant_tables_realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "restaurant_tables" },
+        () => {
+          fetchTables();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [mounted]);
+
+  // Available tables calculation based on database records
+  const availableTables = useMemo(() => {
+    if (dbTables.length > 0) {
+      return dbTables;
+    }
+    if (settings?.tables && settings.tables.length > 0) {
+      return settings.tables;
+    }
+    return Array.from({ length: settings?.table_count || 12 }, (_, i) => ({
+      id: String(i + 1),
+      name: `Table ${String(i + 1).padStart(2, "0")}`
+    }));
+  }, [dbTables, settings]);
 
   // 1. Fresh QR Evaluation & Session Check
   useEffect(() => {
@@ -591,13 +672,6 @@ function MenuContent() {
       setIsSubmittingReview(false);
     }
   };
-
-  const availableTables = settings?.tables && settings.tables.length > 0
-    ? settings.tables
-    : Array.from({ length: settings?.table_count || 20 }, (_, i) => ({
-      id: String(i + 1),
-      name: `Table ${String(i + 1).padStart(2, "0")}`
-    }));
 
   const renderReviewModal = () => {
     if (!isReviewModalOpen) return null;
@@ -1152,7 +1226,7 @@ function MenuContent() {
 
       {renderReviewModal()}
 
-      {/* Tablet / Staff Table Switcher Modal */}
+      {/* Tablet / Staff Table Switcher Modal - Live Sync with restaurant_tables */}
       {isTableSelectorOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40">
           <div className="bg-white rounded-[2rem] w-full max-w-lg p-6 shadow-2xl relative animate-in zoom-in-95 duration-300">
@@ -1163,21 +1237,26 @@ function MenuContent() {
               <X className="w-4 h-4" />
             </button>
 
-            <h3 className="text-xl font-bold text-slate-900 mb-1">Select Table</h3>
+            <div className="flex justify-between items-baseline mb-1 pr-8">
+              <h3 className="text-xl font-bold text-slate-900">Select Table</h3>
+              <span className="text-xs font-bold text-slate-400">
+                {availableTables.length} Tables Active
+              </span>
+            </div>
             <p className="text-xs text-slate-500 mb-4">Tap on table to switch.</p>
 
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[360px] overflow-y-auto p-1 no-scrollbar">
               {availableTables.map((table: any) => {
-                const isActive = tableNumber === table.id;
+                const isActive = String(tableNumber) === String(table.id);
                 return (
                   <button
                     key={table.id}
                     onClick={() => {
-                      setTableNumber(table.id);
-                      localStorage.setItem("active_table", table.id);
+                      setTableNumber(String(table.id));
+                      localStorage.setItem("active_table", String(table.id));
 
                       const newUrl = new URL(window.location.href);
-                      newUrl.searchParams.set("table", table.id);
+                      newUrl.searchParams.set("table", String(table.id));
                       window.history.pushState({}, "", newUrl);
 
                       setIsTableSelectorOpen(false);
@@ -1188,7 +1267,14 @@ function MenuContent() {
                       }`}
                   >
                     <span className="text-2xl mb-1 drop-shadow-sm">🍽️</span>
-                    <span className="text-[10px] sm:text-xs font-bold truncate w-full text-center">{table.name}</span>
+                    <span className="text-[10px] sm:text-xs font-bold truncate w-full text-center">
+                      {table.name || `Table ${String(table.id).padStart(2, "0")}`}
+                    </span>
+                    {table.capacity && (
+                      <span className={`text-[8px] font-bold mt-0.5 ${isActive ? "text-orange-100" : "text-slate-400"}`}>
+                        {table.capacity} Seats
+                      </span>
+                    )}
                   </button>
                 );
               })}

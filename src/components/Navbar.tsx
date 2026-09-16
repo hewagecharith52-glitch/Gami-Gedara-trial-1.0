@@ -92,7 +92,7 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
     return isAuthenticated;
   });
 
-  const formatDateTime = (date: Date) => {
+  const formatFullDateTime = (date: Date) => {
     const weekday = date.toLocaleString('en-US', { weekday: 'short' });
     const day = date.toLocaleString('en-US', { day: '2-digit' });
     const month = date.toLocaleString('en-US', { month: 'short' });
@@ -100,9 +100,14 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
     return `${weekday}, ${day} ${month} | ${time}`;
   };
 
-  const brandDisplayName = settings?.name || "Smart POS";
+  const formatCompactDateTime = (date: Date) => {
+    const day = date.toLocaleString('en-US', { day: '2-digit' });
+    const month = date.toLocaleString('en-US', { month: 'short' });
+    const time = date.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${day} ${month}, ${time}`;
+  };
 
-  // Check if current user is specifically in the Cashier section (/cashier)
+  const brandDisplayName = settings?.name || "Smart POS";
   const isCashierPage = pathname.startsWith("/cashier");
 
   return (
@@ -111,8 +116,8 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
         }`}>
 
         {/* Left Section: Brand, Role & Live Clock */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="flex items-center gap-2.5 shrink-0 pr-1">
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 pr-1">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 text-white flex items-center justify-center shadow-md shadow-orange-500/20 shrink-0">
               <MonitorDot className="w-5 h-5 text-white" />
             </div>
@@ -126,31 +131,39 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
             </div>
           </div>
 
-          {/* Role Badge - Cashier page only */}
+          {/* Role Badge - Small screens: Icon with hover tooltip | Full HD: Full badge */}
           {mounted && isAuthenticated && currentUser && isCashierPage && (
-            <div className="hidden lg:flex items-center gap-2 h-9 px-3 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0">
-              <div className="w-5 h-5 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                <UserCircle className="w-3.5 h-3.5" />
+            <div className="relative group/role hidden lg:flex items-center">
+              <div className="flex items-center gap-1.5 h-9 px-2.5 2xl:px-3 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0 cursor-default hover:bg-slate-100 transition-colors">
+                <div className="w-5 h-5 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                  <UserCircle className="w-3.5 h-3.5" />
+                </div>
+                <div className="hidden 2xl:flex items-baseline gap-1 leading-none">
+                  <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">ROLE</span>
+                  <span className="text-xs font-bold text-slate-800">{currentUser}</span>
+                </div>
               </div>
-              <div className="flex items-baseline gap-1 leading-none">
-                <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Role</span>
-                <span className="text-xs font-bold text-slate-800">{currentUser}</span>
+              {/* Tooltip for small screens */}
+              <div className="2xl:hidden pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-1.5 hidden group-hover/role:flex items-center gap-1 bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-lg whitespace-nowrap z-50 animate-in fade-in zoom-in-95 duration-150">
+                <span className="text-slate-400 text-[9px] uppercase font-extrabold">Role:</span>
+                <span>{currentUser}</span>
               </div>
             </div>
           )}
 
-          {/* Live Clock Badge */}
+          {/* Live Clock Badge - Date + Time on all screens */}
           {mounted && (
-            <div className="hidden xl:flex items-center gap-2 h-9 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs font-bold text-slate-700 whitespace-nowrap shrink-0">
+            <div className="hidden lg:flex items-center gap-2 h-9 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs font-bold text-slate-700 whitespace-nowrap shrink-0">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              {formatDateTime(currentTime)}
+              <span className="hidden 2xl:inline">{formatFullDateTime(currentTime)}</span>
+              <span className="2xl:hidden">{formatCompactDateTime(currentTime)}</span>
             </div>
           )}
         </div>
 
         {/* Center Section: Main Nav Tabs */}
-        <div className="hidden xl:flex items-center justify-center absolute left-1/2 -translate-x-1/2">
-          <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-2xl border border-slate-200/60 shadow-2xs">
+        <div className="hidden xl:flex items-center justify-center absolute left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-2xl border border-slate-200/60 shadow-2xs pointer-events-auto">
             {visibleLinks.map((link) => {
               const isActive = pathname.startsWith(link.href);
               const Icon = link.icon;
@@ -172,7 +185,7 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
         </div>
 
         {/* Right Section: Actions & Logout */}
-        <div className="flex items-center justify-end gap-2 shrink-0 ml-auto">
+        <div className="flex items-center justify-end gap-2 shrink-0 ml-auto z-10">
           {rightActions}
 
           {mounted && isAuthenticated && (
