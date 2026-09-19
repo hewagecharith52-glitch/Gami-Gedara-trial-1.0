@@ -5,7 +5,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   CheckCircle, RefreshCw, Wifi, WifiOff, Clock, UtensilsCrossed,
   ShoppingBag, Bike, MessageSquare, Trash2, Minus, X, Volume2, VolumeX,
-  Flame, ChefHat, Check
+  Flame, ChefHat, Check, ShieldAlert, Lock, AlertTriangle
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -115,6 +115,35 @@ export default function KitchenPage() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
+  // Void PIN & 3-Attempt Lockout Security State
+  const [voidModalTarget, setVoidModalTarget] = useState<{ orderId: string; itemIndex: number; delta: number; itemName: string } | null>(null);
+  const [voidPinInput, setVoidPinInput] = useState("");
+  const [voidPinError, setVoidPinError] = useState("");
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutRemainingSecs, setLockoutRemainingSecs] = useState(0);
+
+  // Persistent Lockout check
+  useEffect(() => {
+    const checkLockout = () => {
+      const lockUntil = localStorage.getItem("kitchen_void_locked_until");
+      if (lockUntil) {
+        const remaining = Math.ceil((parseInt(lockUntil, 10) - Date.now()) / 1000);
+        if (remaining > 0) {
+          setLockoutRemainingSecs(remaining);
+        } else {
+          localStorage.removeItem("kitchen_void_locked_until");
+          setLockoutRemainingSecs(0);
+          setFailedAttempts(0);
+        }
+      }
+    };
+
+    checkLockout();
+    const timer = setInterval(checkLockout, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const soundEnabledRef = useRef(soundEnabled);
   useEffect(() => {
     soundEnabledRef.current = soundEnabled;
@@ -170,9 +199,10 @@ export default function KitchenPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // Kitchen shows ONLY "preparing" status (after Cashier clicks Accept KOT)
   const isKitchenActiveStatus = (status: string) => {
     const s = (status || "").toLowerCase();
-    return s === "pending" || s === "preparing";
+    return s === "preparing";
   };
 
   const fetchOrders = useCallback(async () => {
@@ -183,7 +213,7 @@ export default function KitchenPage() {
       const { data, error } = await supabase
         .from("orders")
         .select("*")
-        .in("status", ["pending", "Pending", "preparing", "Preparing"])
+        .in("status", ["preparing", "Preparing"])
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -281,7 +311,7 @@ export default function KitchenPage() {
     }
   };
 
-  const handleUpdateItemQuantity = async (orderId: string, itemIndex: number, delta: number) => {
+  const executeItemModification = async (orderId: string, itemIndex: number, delta: number) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return;
 
@@ -334,6 +364,84 @@ export default function KitchenPage() {
     if (error) {
       showToast("Error updating item quantity.");
       fetchOrders();
+    } else {
+      showToast("Item removed successfully.", "success");
+    }
+  };
+
+  const handleRequestItemVoid = (orderId: string, itemIndex: number, delta: number) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const item = order.items?.[itemIndex];
+    if (!item) return;
+
+    if (delta === -1 && item.quantity > 1) {
+      executeItemModification(orderId, itemIndex, delta);
+      return;
+    }
+
+    setVoidModalTarget({
+      orderId,
+      itemIndex,
+      delta,
+      itemName: item.name
+    });
+    setVoidPinInput("");
+    setVoidPinError("");
+  };
+
+  const handleConfirmVoidPin = async () => {
+    if (!voidModalTarget || !voidPinInput || lockoutRemainingSecs > 0) return;
+    setIsVerifyingPin(true);
+    setVoidPinError("");
+
+    try {
+      const { data, error } = await supabase
+        .from("restaurant_settings")
+        .select("void_pin, admin_pin")
+        .single();
+
+      if (error || !data) {
+        setVoidPinError("Database verification failed. Please try again.");
+        setIsVerifyingPin(false);
+        return;
+      }
+
+      const dbVoidPin = data.void_pin ? String(data.void_pin).trim() : null;
+      const dbAdminPin = data.admin_pin ? String(data.admin_pin).trim() : null;
+      const enteredPin = voidPinInput.trim();
+
+      const isAuthorized =
+        (dbVoidPin !== null && enteredPin === dbVoidPin) ||
+        (dbAdminPin !== null && enteredPin === dbAdminPin);
+
+      if (!isAuthorized) {
+        const nextAttempts = failedAttempts + 1;
+        setFailedAttempts(nextAttempts);
+
+        if (nextAttempts >= 3) {
+          const lockTime = Date.now() + 120000;
+          localStorage.setItem("kitchen_void_locked_until", lockTime.toString());
+          setLockoutRemainingSecs(120);
+          setVoidPinError("Too many incorrect attempts! Locked for 2 minutes.");
+        } else {
+          setVoidPinError(`Incorrect PIN! Attempt ${nextAttempts} of 3.`);
+        }
+
+        setVoidPinInput("");
+        setIsVerifyingPin(false);
+        return;
+      }
+
+      setFailedAttempts(0);
+      localStorage.removeItem("kitchen_void_locked_until");
+      await executeItemModification(voidModalTarget.orderId, voidModalTarget.itemIndex, voidModalTarget.delta);
+      setVoidModalTarget(null);
+      setVoidPinInput("");
+    } catch (err: any) {
+      setVoidPinError("Verification error: " + (err.message || "Unknown error"));
+    } finally {
+      setIsVerifyingPin(false);
     }
   };
 
@@ -370,6 +478,87 @@ export default function KitchenPage() {
           <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 flex items-center gap-2 px-5 py-2.5 rounded-full shadow-2xl font-bold text-sm bg-slate-900 text-white">
             {toastMessage.type === "success" ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <X className="w-4 h-4 text-rose-400" />}
             {toastMessage.text}
+          </div>
+        )}
+
+        {/* Manager Void PIN Modal with Lockout Protection */}
+        {voidModalTarget && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 max-w-xs w-full animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2 text-slate-900 font-black text-sm">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${lockoutRemainingSecs > 0
+                    ? "bg-rose-500 text-white border-rose-600 animate-pulse"
+                    : "bg-rose-50 text-rose-600 border-rose-100"
+                    }`}>
+                    {lockoutRemainingSecs > 0 ? <ShieldAlert className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                  </div>
+                  <span>Manager PIN</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVoidModalTarget(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-full cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mb-3">
+                Authorized PIN required to void item: <strong className="text-slate-800">{voidModalTarget.itemName}</strong>
+              </p>
+
+              {lockoutRemainingSecs > 0 ? (
+                <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 text-center my-2 animate-in fade-in">
+                  <AlertTriangle className="w-6 h-6 text-rose-500 mx-auto mb-1.5" />
+                  <p className="text-xs font-black text-rose-800 uppercase tracking-wider">Access Suspended</p>
+                  <p className="text-xl font-black font-mono text-rose-600 mt-1">
+                    0{Math.floor(lockoutRemainingSecs / 60)}:{(lockoutRemainingSecs % 60).toString().padStart(2, "0")}
+                  </p>
+                  <p className="text-[11px] font-bold text-rose-600 mt-1">Try again after cooldown.</p>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleConfirmVoidPin();
+                  }}
+                >
+                  <input
+                    type="password"
+                    autoFocus
+                    maxLength={6}
+                    placeholder="••••"
+                    value={voidPinInput}
+                    onChange={(e) => setVoidPinInput(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl py-3 px-4 text-center tracking-[0.4em] text-2xl font-black text-slate-900 outline-none focus:border-orange-500 focus:bg-white transition-all mb-2"
+                  />
+
+                  {voidPinError && (
+                    <p className="text-rose-500 text-xs font-bold text-center mb-3">
+                      {voidPinError}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setVoidModalTarget(null)}
+                      className="py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isVerifyingPin || !voidPinInput}
+                      className="py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs transition-all shadow-md shadow-rose-500/20 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isVerifyingPin ? "Checking..." : "Authorize"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         )}
 
@@ -415,9 +604,9 @@ export default function KitchenPage() {
                   setSoundEnabled(next);
                   if (next) getAudioContext();
                 }}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all shadow-2xs ${soundEnabled
-                    ? "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    : "bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all shadow-2xs cursor-pointer ${soundEnabled
+                  ? "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  : "bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100"
                   }`}
               >
                 {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-rose-500" />}
@@ -428,7 +617,7 @@ export default function KitchenPage() {
                 type="button"
                 onClick={fetchOrders}
                 disabled={isRefreshing}
-                className="p-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-lg transition-all disabled:opacity-50 border border-slate-200 shadow-2xs active:scale-95 shrink-0"
+                className="p-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-lg transition-all disabled:opacity-50 border border-slate-200 shadow-2xs active:scale-95 shrink-0 cursor-pointer"
                 title="Refresh orders"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-orange-500" : ""}`} />
@@ -463,10 +652,10 @@ export default function KitchenPage() {
                   <div
                     key={order.id}
                     className={`bg-white rounded-xl overflow-hidden border-2 flex flex-col shadow-2xs transition-all duration-200 ${hasNewItems
-                        ? "border-orange-500 shadow-md shadow-orange-500/10 ring-2 ring-orange-500/20"
-                        : isAllPrepared
-                          ? "border-emerald-400 shadow-emerald-500/10"
-                          : "border-slate-200/90 hover:border-slate-300"
+                      ? "border-orange-500 shadow-md shadow-orange-500/10 ring-2 ring-orange-500/20"
+                      : isAllPrepared
+                        ? "border-emerald-400 shadow-emerald-500/10"
+                        : "border-slate-200/90 hover:border-slate-300"
                       }`}
                   >
                     {/* Extra items banner */}
@@ -479,10 +668,10 @@ export default function KitchenPage() {
                     {/* Ticket Header */}
                     <div
                       className={`px-2.5 py-1.5 border-b flex justify-between items-center ${hasNewItems
-                          ? "bg-orange-50/70 border-orange-100"
-                          : isDineIn
-                            ? "bg-slate-900 text-white border-slate-800"
-                            : "bg-gradient-to-r from-slate-800 to-indigo-950 text-white border-slate-700"
+                        ? "bg-orange-50/70 border-orange-100"
+                        : isDineIn
+                          ? "bg-slate-900 text-white border-slate-800"
+                          : "bg-gradient-to-r from-slate-800 to-indigo-950 text-white border-slate-700"
                         }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -510,8 +699,8 @@ export default function KitchenPage() {
                       <div className="flex items-center gap-1 shrink-0">
                         <span
                           className={`text-[10px] px-1.5 py-0.5 rounded font-bold border flex items-center gap-1 ${hasNewItems
-                              ? "bg-white text-slate-800 border-orange-200"
-                              : "bg-white/10 text-white border-white/20"
+                            ? "bg-white text-slate-800 border-orange-200"
+                            : "bg-white/10 text-white border-white/20"
                             }`}
                         >
                           <Clock className="w-2.5 h-2.5 opacity-70" />
@@ -538,25 +727,25 @@ export default function KitchenPage() {
                       {order.items?.map((item, idx) => {
                         const isLarge = item.name.toLowerCase().includes("(large)");
                         const isRegular = item.name.toLowerCase().includes("(regular)");
-                        const cleanName = item.name.replace(/\s*\((Regular|Large)\)\s*/gi, "").trim();
+                        const cleanName = item.name.replace(/\s*\((Regular\vert{}Large)\)\s*/gi, "").trim();
 
                         return (
                           <div
                             key={idx}
                             onClick={(e) => handleToggleItemPrepared(order.id, idx, e)}
                             className={`p-1.5 rounded-lg border transition-all cursor-pointer select-none relative group ${item.prepared
-                                ? "bg-slate-100/90 border-slate-200 text-slate-400 opacity-60"
-                                : item.is_new
-                                  ? "bg-orange-50/90 border-orange-300 text-slate-900 shadow-2xs"
-                                  : "bg-white border-slate-200/90 hover:border-orange-300 text-slate-900 shadow-2xs"
+                              ? "bg-slate-100/90 border-slate-200 text-slate-400 opacity-60"
+                              : item.is_new
+                                ? "bg-orange-50/90 border-orange-300 text-slate-900 shadow-2xs"
+                                : "bg-white border-slate-200/90 hover:border-orange-300 text-slate-900 shadow-2xs"
                               }`}
                           >
                             <div className="flex items-start justify-between gap-1">
                               <div className="flex items-start gap-1.5 flex-1 min-w-0">
                                 <div
                                   className={`w-3.5 h-3.5 rounded border flex items-center justify-center mt-0.5 shrink-0 transition-all ${item.prepared
-                                      ? "bg-emerald-500 border-emerald-500 text-white shadow-2xs"
-                                      : "bg-white border-slate-300 text-transparent group-hover:border-emerald-400"
+                                    ? "bg-emerald-500 border-emerald-500 text-white shadow-2xs"
+                                    : "bg-white border-slate-300 text-transparent group-hover:border-emerald-400"
                                     }`}
                                 >
                                   <Check className="w-2.5 h-2.5 stroke-[3.5]" />
@@ -566,10 +755,10 @@ export default function KitchenPage() {
                                   <div className="flex items-baseline gap-1 flex-wrap">
                                     <span
                                       className={`text-[11px] font-black px-1 rounded leading-none shrink-0 ${item.prepared
-                                          ? "bg-slate-200 text-slate-500"
-                                          : item.is_new
-                                            ? "bg-orange-500 text-white"
-                                            : "bg-slate-900 text-white"
+                                        ? "bg-slate-200 text-slate-500"
+                                        : item.is_new
+                                          ? "bg-orange-500 text-white"
+                                          : "bg-slate-900 text-white"
                                         }`}
                                     >
                                       {item.quantity}x
@@ -582,19 +771,19 @@ export default function KitchenPage() {
                                     </span>
                                   </div>
 
-                                  <div className="flex items-center gap-1 mt-0.5">
+                                  <div className="flex items-center gap-1 mt-1">
                                     {isLarge && (
-                                      <span className="text-[8px] font-black uppercase tracking-wider px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 border border-indigo-200">
-                                        L
+                                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                                        Large
                                       </span>
                                     )}
                                     {isRegular && (
-                                      <span className="text-[8px] font-bold uppercase tracking-wider px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                        R
+                                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs">
+                                        Regular
                                       </span>
                                     )}
                                     {item.is_new && !item.prepared && (
-                                      <span className="text-[8px] font-black uppercase tracking-wider px-1 py-0.2 rounded bg-orange-500 text-white animate-pulse">
+                                      <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse">
                                         New
                                       </span>
                                     )}
@@ -616,17 +805,17 @@ export default function KitchenPage() {
                                 >
                                   <button
                                     type="button"
-                                    onClick={() => handleUpdateItemQuantity(order.id, idx, -1)}
-                                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors active:scale-95"
+                                    onClick={() => handleRequestItemVoid(order.id, idx, -1)}
+                                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors active:scale-95 cursor-pointer"
                                     title="Decrease Qty"
                                   >
                                     <Minus className="w-3 h-3" />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleUpdateItemQuantity(order.id, idx, 0)}
-                                    className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors active:scale-95"
-                                    title="Remove Item"
+                                    onClick={() => handleRequestItemVoid(order.id, idx, 0)}
+                                    className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors active:scale-95 cursor-pointer"
+                                    title="Remove Item (PIN Required)"
                                   >
                                     <Trash2 className="w-3 h-3" />
                                   </button>
@@ -655,9 +844,9 @@ export default function KitchenPage() {
                       <button
                         type="button"
                         onClick={() => markReady(order.id)}
-                        className={`w-full py-1.5 rounded-lg font-black text-xs transition-all flex justify-center items-center gap-1 shadow-2xs active:scale-95 ${isAllPrepared
-                            ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
-                            : "bg-slate-900 hover:bg-slate-800 text-white"
+                        className={`w-full py-1.5 rounded-lg font-black text-xs transition-all flex justify-center items-center gap-1 shadow-2xs active:scale-95 cursor-pointer ${isAllPrepared
+                          ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
+                          : "bg-slate-900 hover:bg-slate-800 text-white"
                           }`}
                       >
                         <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]" />

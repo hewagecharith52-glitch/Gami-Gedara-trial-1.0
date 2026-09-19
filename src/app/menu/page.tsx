@@ -7,7 +7,7 @@ import MenuItemCard, { MenuItem as CardMenuItem } from "@/components/MenuItemCar
 import {
   Search, ShoppingBag, Plus, Minus, Clock,
   CheckCircle, UtensilsCrossed, X, Star, AlertCircle, ChefHat,
-  Lock, AlertTriangle
+  AlertTriangle
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import confetti from "canvas-confetti";
@@ -26,24 +26,14 @@ type CartItem = {
   cartItemId: string;
 };
 
-const SETTLEMENT_LOCK_MS = 40 * 60 * 1000; // 40 Minutes Post-Payment Lock
-const SESSION_TIMEOUT_MS = 40 * 60 * 1000; // 40 Minutes Dining Session Timeout
-
 function MenuContent() {
   const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
   const urlTableNumber = searchParams.get("table");
   const urlMode = searchParams.get("mode");
-  const urlScanToken = searchParams.get("t");
 
   const [tableNumber, setTableNumber] = useState("");
   const [isTableSelectorOpen, setIsTableSelectorOpen] = useState(false);
-
-  // Security Session & Review State
-  const [isSessionExpired, setIsSessionExpired] = useState(false);
-  const [isBillSettled, setIsBillSettled] = useState(false);
-  const [reviewSubmitted, setReviewSubmitted] = useState(false);
-  const [sessionExpiryReason, setSessionExpiryReason] = useState("");
   const [noQrDetected, setNoQrDetected] = useState(false);
 
   const { isAuthenticated } = useAuth();
@@ -145,7 +135,6 @@ function MenuContent() {
     };
   }, [mounted]);
 
-  // Available tables calculation based on database records
   const availableTables = useMemo(() => {
     if (dbTables.length > 0) {
       return dbTables;
@@ -159,7 +148,7 @@ function MenuContent() {
     }));
   }, [dbTables, settings]);
 
-  // 1. Fresh QR Evaluation & Session Check
+  // Set Table Number (Lock & 40-minute limitations completely removed)
   useEffect(() => {
     if (!mounted) return;
 
@@ -179,165 +168,14 @@ function MenuContent() {
     setTableNumber(activeTable);
     localStorage.setItem("active_table", activeTable);
 
-    const sessionKey = `pos_table_session_${activeTable}`;
-    const tokenKey = `pos_table_token_${activeTable}`;
-    const lockKey = `pos_table_lock_${activeTable}`;
-
-    // Direct check for OrderTracking settlement lock
-    const existingLock = localStorage.getItem(lockKey);
-    if (existingLock === "SETTLED") {
-      setIsBillSettled(true);
+    // Clean any old leftover locks
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(`pos_table_lock_${activeTable}`);
+      localStorage.removeItem(`pos_table_session_${activeTable}`);
     }
+  }, [mounted, urlTableNumber, isBypassMode]);
 
-    // Fresh Scan Token detection
-    if (urlScanToken) {
-      const storedToken = localStorage.getItem(tokenKey);
-      if (storedToken !== urlScanToken) {
-        localStorage.setItem(tokenKey, urlScanToken);
-        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
-        localStorage.removeItem(lockKey);
-        setIsBillSettled(false);
-        setIsSessionExpired(false);
-        setReviewSubmitted(false);
-      }
-    }
-
-    // Evaluate existing session time window
-    const storedSession = localStorage.getItem(sessionKey);
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession);
-        const elapsed = Date.now() - parsed.startTime;
-
-        if (parsed.settled) {
-          setIsBillSettled(true);
-          return;
-        }
-
-        if (elapsed > SESSION_TIMEOUT_MS) {
-          setIsSessionExpired(true);
-          setSessionExpiryReason("Your 40-minute dining session has expired to prevent accidental orders.");
-        }
-      } catch (e) {
-        localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
-      }
-    } else {
-      localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: false }));
-    }
-  }, [mounted, urlTableNumber, urlScanToken, isBypassMode]);
-
-  // 2. Database Sync: Check latest order status and apply 40-minute settlement lock
-  useEffect(() => {
-    if (!mounted || !tableNumber || isBypassMode) return;
-
-    const verifyDatabaseState = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("orders")
-          .select("id, status, created_at, updated_at")
-          .eq("table_no", tableNumber)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        if (!error && data && data.length > 0) {
-          const latestOrder = data[0];
-          const status = String(latestOrder.status).toLowerCase();
-          const orderTime = new Date(latestOrder.updated_at || latestOrder.created_at).getTime();
-          const elapsedSinceOrder = Date.now() - orderTime;
-
-          if (status === "completed" && elapsedSinceOrder < SETTLEMENT_LOCK_MS) {
-            setIsBillSettled(true);
-            setIsCartOpen(false);
-            setCart([]);
-
-            localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
-            const sessionKey = `pos_table_session_${tableNumber}`;
-            localStorage.setItem(sessionKey, JSON.stringify({ startTime: orderTime, settled: true }));
-          } else if (status === "completed" && elapsedSinceOrder >= SETTLEMENT_LOCK_MS) {
-            // Lock expired after 40 minutes, allow next guest session
-            localStorage.removeItem(`pos_table_lock_${tableNumber}`);
-            const sessionKey = `pos_table_session_${tableNumber}`;
-            const stored = localStorage.getItem(sessionKey);
-            if (stored) {
-              const parsed = JSON.parse(stored);
-              if (parsed.settled) {
-                localStorage.removeItem(sessionKey);
-                setIsBillSettled(false);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Table state sync check failed", e);
-      }
-    };
-
-    verifyDatabaseState();
-  }, [mounted, tableNumber, isBypassMode]);
-
-  // 3. Realtime Supabase Bill Settlement Listener
-  useEffect(() => {
-    if (!mounted || !tableNumber || isBypassMode) return;
-
-    const channelName = `customer_settlement_listener_${tableNumber}_${Date.now()}`;
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "orders"
-        },
-        (payload) => {
-          const updatedOrder = payload.new as any;
-          if (String(updatedOrder.table_no) === String(tableNumber)) {
-            const status = String(updatedOrder.status || "").toLowerCase();
-            if (status === "completed") {
-              setIsBillSettled(true);
-              setIsCartOpen(false);
-              setCart([]);
-
-              localStorage.setItem(`pos_table_lock_${tableNumber}`, "SETTLED");
-              const sessionKey = `pos_table_session_${tableNumber}`;
-              localStorage.setItem(sessionKey, JSON.stringify({ startTime: Date.now(), settled: true }));
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [mounted, tableNumber, isBypassMode]);
-
-  // 4. Periodic 40-Minute Timeout Check
-  useEffect(() => {
-    if (!mounted || !tableNumber || isBypassMode) return;
-
-    const interval = setInterval(() => {
-      const sessionKey = `pos_table_session_${tableNumber}`;
-      const stored = localStorage.getItem(sessionKey);
-
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          const elapsed = Date.now() - parsed.startTime;
-          if (elapsed > SESSION_TIMEOUT_MS && !isSessionExpired && !isBillSettled) {
-            setIsSessionExpired(true);
-            setIsCartOpen(false);
-            setCart([]);
-            setSessionExpiryReason("Your 40-minute dining session has expired to prevent accidental orders.");
-          }
-        } catch (e) { }
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [mounted, tableNumber, isBypassMode, isSessionExpired, isBillSettled]);
-
-  // 5. Fetch Active Menu Items
+  // Fetch Active Menu Items
   useEffect(() => {
     if (!mounted) return;
     let isMounted = true;
@@ -374,10 +212,9 @@ function MenuContent() {
     };
   }, [mounted]);
 
-  // Modal background scroll lock
   const isAnyModalOpen = Boolean(
     isCartOpen || isReviewModalOpen || isTableSelectorOpen ||
-    (!isBypassMode && (isSessionExpired || isBillSettled || noQrDetected))
+    (!isBypassMode && noQrDetected)
   );
 
   useEffect(() => {
@@ -462,26 +299,22 @@ function MenuContent() {
     return ["All", ...cats];
   }, [groupedMenu]);
 
+  // Search Logic: ONLY filter by Dish Name
   const filteredMenu = useMemo(() => {
     let filtered = groupedMenu;
     if (activeCategory !== "All") {
       filtered = filtered.filter((item) => item.category === activeCategory);
     }
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (item) => item.name.toLowerCase().includes(q) || (item.description && item.description.toLowerCase().includes(q))
+      const q = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter((item) =>
+        item.name.toLowerCase().includes(q)
       );
     }
     return filtered;
   }, [groupedMenu, activeCategory, searchQuery]);
 
   const handleAddCardToCart = (item: CardMenuItem, selectedSize: "Regular" | "Large", finalPrice: number) => {
-    if (!isBypassMode && (isSessionExpired || isBillSettled)) {
-      showToast("Session closed. Please scan table QR to order.", "error");
-      return;
-    }
-
     let cartItemName = item.name;
     if (item.large_item) {
       cartItemName = `${item.name.replace(/\s*\((Regular|Large)\)\s*/gi, "").trim()} (${selectedSize})`;
@@ -494,7 +327,7 @@ function MenuContent() {
       if (existing) {
         return prev.map((i) => (i.name === cartItemName ? { ...i, quantity: i.quantity + 1 } : i));
       }
-      return [...prev, { id: item.id, name: cartItemName, price: finalPrice, quantity: 1, cartItemId }];
+      return [...prev, { id: item.id, name: cartItemName, price: finalPrice, quantity: 1, cartItemId, notes: "" }];
     });
 
     showToast(`Added ${cartItemName} to cart`, "success");
@@ -512,6 +345,12 @@ function MenuContent() {
     });
   };
 
+  const updateItemNote = (name: string, note: string) => {
+    setCart((prev) =>
+      prev.map((item) => (item.name === name ? { ...item, notes: note } : item))
+    );
+  };
+
   const taxPct = Number(settings?.tax_pct ?? 0);
   const serviceChargePct = Number(settings?.service_charge_pct ?? 10);
   const currencySymbol = settings?.currency || "LKR";
@@ -523,10 +362,6 @@ function MenuContent() {
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
 
   const placeOrder = async () => {
-    if (!isBypassMode && (isSessionExpired || isBillSettled)) {
-      showToast("Session closed. Please scan table QR to order.", "error");
-      return;
-    }
     if (cart.length === 0) return;
     setIsSubmitting(true);
 
@@ -538,7 +373,7 @@ function MenuContent() {
       name: String(item.name),
       price: Number(item.price),
       quantity: Number(item.quantity),
-      notes: item.notes || ""
+      notes: (item.notes || "").trim()
     }));
 
     try {
@@ -655,7 +490,6 @@ function MenuContent() {
         showToast("Failed to submit review: " + error.message, "error");
       } else {
         setIsReviewModalOpen(false);
-        setReviewSubmitted(true);
         setReviewComment("");
         setWaiterName("");
         setReviewerName("");
@@ -783,7 +617,6 @@ function MenuContent() {
     );
   };
 
-  // Initial SSR Guard
   if (!mounted) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans">
@@ -795,7 +628,6 @@ function MenuContent() {
     );
   }
 
-  // 1. Direct web visit without QR code (for guests)
   if (!isBypassMode && noQrDetected) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
@@ -810,78 +642,13 @@ function MenuContent() {
     );
   }
 
-  // Review Submitted & Locked Final View
-  if (reviewSubmitted) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500 font-sans">
-        <div className="w-24 h-24 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-xl shadow-emerald-500/20 ring-8 ring-emerald-50">
-          <CheckCircle className="w-12 h-12 animate-bounce" />
-        </div>
-        <h2 className="text-3xl font-black text-slate-900 mb-2">Thank You! 🎉</h2>
-        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6 leading-relaxed">
-          Your feedback has been successfully received. We hope you enjoyed your dining experience at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}!
-        </p>
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500 space-y-2">
-          <p className="font-bold text-slate-700">Dining Session Closed</p>
-          <p>You can now safely close this window or leave the table. Have a wonderful day!</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 2. Bill Settled View (Persistent across reloads)
-  if (!isBypassMode && isBillSettled) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-lg shadow-emerald-500/20">
-          <CheckCircle className="w-10 h-10" />
-        </div>
-        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Bill Settled!</h2>
-        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
-          Thank you for dining with us at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}! Your dining session is now closed.
-        </p>
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500 space-y-2">
-          <p className="font-bold text-slate-700">Need to place another order?</p>
-          <p>Please re-scan the table QR code to start a new dining session.</p>
-        </div>
-        <button
-          onClick={() => setIsReviewModalOpen(true)}
-          className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <Star className="w-5 h-5 fill-white" /> Leave a Review
-        </button>
-        {renderReviewModal()}
-      </div>
-    );
-  }
-
-  // 3. 40-Minute Timeout View (Persistent across reloads)
-  if (!isBypassMode && isSessionExpired) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-20 h-20 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mb-6 shadow-lg shadow-orange-500/20">
-          <Lock className="w-10 h-10" />
-        </div>
-        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Session Expired</h2>
-        <p className="text-sm font-semibold text-slate-600 max-w-sm mb-6">
-          {sessionExpiryReason || "Your 40-minute ordering window has ended to prevent accidental or remote orders."}
-        </p>
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm max-w-sm w-full mb-6 text-xs text-slate-500">
-          <p className="font-bold text-slate-700 mb-1">Still at Table {tableNumber ? tableNumber.padStart(2, "0") : ""}?</p>
-          <p>Please re-scan the QR code on your table to refresh your session and continue ordering.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 4. Order Placed Confirmation View
   if (orderSuccess) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative overflow-hidden">
         {isAuthenticated ? (
           <Navbar />
         ) : (
-          <header className="fixed top-0 w-full z-50 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 md:h-[72px] flex items-center justify-between shadow-sm">
+          <header className="fixed top-0 w-full z-40 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-orange-500 text-white flex items-center justify-center shadow-sm shadow-orange-500/20 shrink-0">
                 <UtensilsCrossed className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
@@ -965,9 +732,8 @@ function MenuContent() {
     );
   }
 
-  // 5. Active Browsable Menu View
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pt-16 md:pt-[72px] pb-32 font-sans selection:bg-orange-500/30">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pt-16 pb-32 font-sans selection:bg-orange-500/30">
       {isAuthenticated ? (
         <Navbar rightActions={
           <div className="flex items-center gap-2">
@@ -991,7 +757,7 @@ function MenuContent() {
           </div>
         } />
       ) : (
-        <header className="fixed top-0 w-full z-50 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 md:h-[72px] flex items-center justify-between shadow-sm">
+        <header className="fixed top-0 w-full z-40 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-orange-500 text-white flex items-center justify-center shadow-sm shadow-orange-500/20 shrink-0">
               <UtensilsCrossed className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
@@ -1035,36 +801,36 @@ function MenuContent() {
 
       {/* Toast */}
       {uiToast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[150] bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-xl flex items-center gap-2 font-bold text-sm animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[150] bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-xl flex items-center gap-2 font-bold text-sm animate-in fade-in slide-from-top-2 duration-300">
           {uiToast.type === "success" ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <AlertCircle className="w-5 h-5 text-rose-400" />}
           {uiToast.text}
         </div>
       )}
 
-      {/* Sticky Search & Category Bar */}
-      <div className="sticky top-16 md:top-[72px] z-20 bg-slate-50 border-b border-slate-200 shadow-sm pt-3 lg:pt-6">
-        <div className="px-5 pb-4">
+      {/* Seamless Sticky Search & Category Bar */}
+      <div className="sticky top-16 z-30 bg-slate-50 border-b border-slate-200/90 shadow-2xs pt-3 sm:pt-4">
+        <div className="px-3 sm:px-6 max-w-7xl mx-auto pb-3">
           <div className="relative group">
-            <Search className="w-5 h-5 absolute left-5 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+            <Search className="w-4 h-4 sm:w-5 sm:h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
             <input
               type="text"
-              placeholder="Search for delicious food..."
+              placeholder="Search dishes by name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-14 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all outline-none placeholder:text-slate-400 font-bold shadow-sm"
+              className="w-full pl-11 sm:pl-12 pr-4 py-2.5 sm:py-3 bg-white border border-slate-200 rounded-2xl text-xs sm:text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all outline-none placeholder:text-slate-400 font-bold shadow-2xs"
             />
           </div>
         </div>
 
         {!searchQuery && (
-          <div className="flex overflow-x-auto px-5 pb-4 gap-2 no-scrollbar scroll-smooth">
+          <div className="flex overflow-x-auto px-3 sm:px-6 max-w-7xl mx-auto pb-3 gap-1.5 sm:gap-2 no-scrollbar scroll-smooth">
             {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-300 shadow-sm shrink-0 cursor-pointer ${activeCategory === cat
-                  ? "bg-gradient-to-r from-orange-500 to-orange-400 text-white shadow-orange-500/30 border-transparent"
-                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                className={`px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 shadow-2xs shrink-0 cursor-pointer ${activeCategory === cat
+                  ? "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-orange-500/20 scale-[1.02]"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
                   }`}
               >
                 {cat}
@@ -1075,7 +841,7 @@ function MenuContent() {
       </div>
 
       {/* Food Items Grid */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-4 py-4 sm:py-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 overflow-x-hidden">
+      <main className="relative z-10 flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-2 py-4 sm:py-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 overflow-x-hidden">
         {filteredMenu.map((item) => (
           <MenuItemCard
             key={item.id}
@@ -1089,7 +855,7 @@ function MenuContent() {
           <div className="text-center py-20 bg-white rounded-3xl border border-slate-200 shadow-sm col-span-full">
             <ChefHat className="w-16 h-16 text-slate-300 mx-auto mb-4" />
             <p className="font-bold text-xl text-slate-700">No items found</p>
-            <p className="text-sm text-slate-500 mt-2 font-medium">Try adjusting your search or category.</p>
+            <p className="text-sm text-slate-500 mt-2 font-medium">Try searching by a different dish name.</p>
           </div>
         )}
       </main>
@@ -1159,44 +925,52 @@ function MenuContent() {
 
           <div className="p-6 flex-1 overflow-y-auto space-y-4">
             {cart.map((item) => (
-              <div key={item.name} className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                <div className="flex-1 pr-4">
-                  <h4 className="font-bold text-slate-900 text-base leading-tight">{item.name}</h4>
-                  <p className="text-orange-500 font-bold text-sm mt-1">
-                    {currencySymbol} {(item.price * item.quantity).toLocaleString()}
-                  </p>
-                  {item.notes && (
-                    <p className="text-xs text-slate-500 mt-1 font-medium bg-slate-50 p-1.5 rounded-lg border border-slate-100 italic">
-                      Note: {item.notes}
+              <div key={item.name} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-2.5">
+                <div className="flex justify-between items-center">
+                  <div className="flex-1 pr-4">
+                    <h4 className="font-bold text-slate-900 text-base leading-tight">{item.name}</h4>
+                    <p className="text-orange-500 font-bold text-sm mt-1">
+                      {currencySymbol} {(item.price * item.quantity).toLocaleString()}
                     </p>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-1 border border-slate-200 shrink-0">
+                    <button
+                      onClick={() => updateCartById(item.name, -1)}
+                      className="w-8 h-8 flex items-center justify-center bg-white rounded-lg text-slate-700 shadow-sm border border-slate-100 active:scale-90 cursor-pointer"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <span className="w-6 text-center font-bold text-slate-900">{item.quantity}</span>
+                    <button
+                      onClick={() => updateCartById(item.name, 1)}
+                      className="w-8 h-8 flex items-center justify-center bg-orange-500 text-white rounded-lg shadow-sm active:scale-90 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-1 border border-slate-200 shrink-0">
-                  <button
-                    onClick={() => updateCartById(item.name, -1)}
-                    className="w-8 h-8 flex items-center justify-center bg-white rounded-lg text-slate-700 shadow-sm border border-slate-100 active:scale-90 cursor-pointer"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <span className="w-6 text-center font-bold text-slate-900">{item.quantity}</span>
-                  <button
-                    onClick={() => updateCartById(item.name, 1)}
-                    className="w-8 h-8 flex items-center justify-center bg-orange-500 text-white rounded-lg shadow-sm active:scale-90 cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
+
+                {/* Per-Item Custom Note Input */}
+                <div className="pt-2 border-t border-slate-100">
+                  <input
+                    type="text"
+                    placeholder="Special note for this item (e.g. Less spicy, no onion)..."
+                    value={item.notes || ""}
+                    onChange={(e) => updateItemNote(item.name, e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-orange-500 focus:bg-white transition-all font-medium shadow-inner"
+                  />
                 </div>
               </div>
             ))}
 
             <div className="mt-6">
-              <label className="block text-sm font-bold text-slate-700 mb-2">Special Cooking Notes</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Overall Cooking Notes (For the whole order)</label>
               <textarea
                 value={cookingNotes}
                 onChange={(e) => setCookingNotes(e.target.value)}
-                placeholder="e.g., Less spicy, extra sauce..."
+                placeholder="e.g., Serve all food together..."
                 className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all placeholder:text-slate-400 font-medium shadow-sm"
-                rows={3}
+                rows={2}
               />
             </div>
           </div>
@@ -1226,7 +1000,7 @@ function MenuContent() {
 
       {renderReviewModal()}
 
-      {/* Tablet / Staff Table Switcher Modal - Live Sync with restaurant_tables */}
+      {/* Tablet / Staff Table Switcher Modal */}
       {isTableSelectorOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40">
           <div className="bg-white rounded-[2rem] w-full max-w-lg p-6 shadow-2xl relative animate-in zoom-in-95 duration-300">

@@ -27,12 +27,12 @@ const defaultSettings: RestaurantSettings = {
   id: 1,
   name: "Gravity House",
   tagline: "Smart POS",
-  currency: "Rs",
-  service_charge_pct: 12,
+  currency: "LKR",
+  service_charge_pct: 10,
   tax_pct: 0,
   table_count: 12,
-  phone: "0714850600",
-  address: "123 Main Street, Colombo 7",
+  phone: "+94 77 123 4567",
+  address: "123 Main Street, Colombo",
 };
 
 const SETTINGS_CACHE_KEY = "pos_cached_restaurant_settings";
@@ -52,7 +52,6 @@ const SettingsContext = createContext<SettingsContextType>({
 });
 
 export const SettingsProvider = ({ children }: { children: React.ReactNode }) => {
-  // Load cached settings immediately to eliminate 0-second delay / flickering
   const [settings, setSettings] = useState<RestaurantSettings>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -125,26 +124,47 @@ export const SettingsProvider = ({ children }: { children: React.ReactNode }) =>
       const sCharge = Number(newSettings.service_charge_pct ?? settings.service_charge_pct);
       const tax = Number(newSettings.tax_pct ?? settings.tax_pct);
 
-      const payload: any = {
-        ...settings,
-        ...newSettings,
+      const dbPayload: any = {
         id: targetId,
+        name: newSettings.name ?? settings.name,
+        tagline: newSettings.tagline ?? settings.tagline,
+        currency: newSettings.currency ?? settings.currency,
         service_charge_pct: Number.isFinite(sCharge) ? sCharge : 0,
         tax_pct: Number.isFinite(tax) ? tax : 0,
+        table_count: Number(newSettings.table_count ?? settings.table_count) || 12,
+        phone: newSettings.phone ?? settings.phone ?? "",
+        address: newSettings.address ?? settings.address ?? "",
         updated_at: new Date().toISOString()
       };
 
-      setSettings(payload);
+      const mergedLocal = { ...settings, ...dbPayload };
+      setSettings(mergedLocal);
       if (typeof window !== "undefined") {
-        localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(payload));
+        localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(mergedLocal));
       }
 
-      const { error } = await supabase
+      const { data: existing } = await supabase
         .from("restaurant_settings")
-        .upsert(payload, { onConflict: "id" });
+        .select("id")
+        .eq("id", targetId)
+        .maybeSingle();
+
+      let error;
+      if (existing) {
+        const res = await supabase
+          .from("restaurant_settings")
+          .update(dbPayload)
+          .eq("id", targetId);
+        error = res.error;
+      } else {
+        const res = await supabase
+          .from("restaurant_settings")
+          .insert([dbPayload]);
+        error = res.error;
+      }
 
       if (error) {
-        console.error("Error upserting restaurant_settings:", error);
+        console.error("Error saving restaurant_settings to DB:", error.message || error);
         return false;
       }
 

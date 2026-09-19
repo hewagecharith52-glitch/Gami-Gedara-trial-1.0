@@ -1,310 +1,232 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { X, CheckCircle, ArrowLeft } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { X, Check, ArrowLeft, CreditCard, Banknote, Split } from "lucide-react";
 
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
     totalAmount: number;
-    currencySymbol?: string;
+    currencySymbol: string;
     orderType?: string;
-    onConfirmPayment: (
-        method: string,
-        tendered?: string,
-        change?: number
-    ) => void;
-    isSubmitting?: boolean;
+    onConfirmPayment: (method: string, tendered?: string, change?: number) => Promise<void>;
+    isSubmitting: boolean;
+    initialMethod?: string;
 }
 
 export default function PaymentModal({
     isOpen,
     onClose,
     totalAmount,
-    currencySymbol = "LKR",
+    currencySymbol,
     orderType = "dine-in",
     onConfirmPayment,
-    isSubmitting = false,
+    isSubmitting,
+    initialMethod = "Cash",
 }: PaymentModalProps) {
-    const [viewMode, setViewMode] = useState<"options" | "cash" | "split">("options");
-    const [cashGiven, setCashGiven] = useState("");
-    const [splitCashAmount, setSplitCashAmount] = useState("");
+    const [activeTab, setActiveTab] = useState<string>(initialMethod);
+    const [cashTendered, setCashTendered] = useState<string>("");
+    const [splitCash, setSplitCash] = useState<string>("");
+    const inputRef = useRef<HTMLInputElement>(null);
 
-    // Modal එක Open වන වාරයක් පාතා ප්‍රධාන Menu එකට (options) Reset වීම
+    useEffect(() => {
+        setActiveTab(initialMethod);
+        setCashTendered("");
+        setSplitCash("");
+    }, [initialMethod, isOpen]);
+
     useEffect(() => {
         if (isOpen) {
-            setViewMode("options");
-            setCashGiven("");
-            setSplitCashAmount("");
+            setTimeout(() => inputRef.current?.focus(), 80);
         }
-    }, [isOpen]);
+    }, [isOpen, activeTab]);
 
     if (!isOpen) return null;
 
-    const handleReset = () => {
-        setViewMode("options");
-        setCashGiven("");
-        setSplitCashAmount("");
+    const tenderedNumber = Number(cashTendered) || 0;
+    const changeToReturn = Math.max(0, tenderedNumber - totalAmount);
+    const remainingDue = Math.max(0, totalAmount - tenderedNumber);
+
+    const splitCashNumber = Number(splitCash) || 0;
+    const splitCardAmount = Math.max(0, totalAmount - splitCashNumber);
+
+    const handleCashSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (isSubmitting) return;
+        const finalTendered = tenderedNumber > 0 ? String(tenderedNumber) : String(totalAmount);
+        onConfirmPayment("Cash", finalTendered, changeToReturn);
     };
 
-    const handleModalClose = () => {
-        handleReset();
-        onClose();
+    const handleSplitSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (isSubmitting || splitCashNumber <= 0) return;
+        onConfirmPayment("Split", String(splitCashNumber), 0);
     };
-
-    const isDineIn = !orderType || orderType.startsWith("dine-in");
-
-    // Cash validation: දුන් මුදල Total එකට වඩා අඩු නම් Settle වීම වැළැක්වීම
-    const cashNum = Number(cashGiven || 0);
-    const isCashInsufficient = cashGiven !== "" && cashNum < totalAmount;
-
-    // Validation logic for Split Payment
-    const splitCashNum = Number(splitCashAmount || 0);
-    const isSplitCashExceeded = splitCashAmount !== "" && splitCashNum >= totalAmount;
-    const isSplitInvalid = !splitCashAmount || isNaN(splitCashNum) || splitCashNum <= 0 || isSplitCashExceeded;
 
     return (
-        <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 no-print"
-            onKeyDown={(e) => {
-                if (e.key === "Escape") handleModalClose();
-            }}
-        >
-            <style>{`
-                @keyframes shake {
-                  0%, 100% { transform: translateX(0); }
-                  20%, 60% { transform: translateX(-6px); }
-                  40%, 80% { transform: translateX(6px); }
-                }
-                .animate-shake {
-                  animation: shake 0.35s ease-in-out;
-                }
-            `}</style>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-4 no-print animate-in fade-in duration-150">
+            <div className="bg-white border border-slate-200/90 w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
 
-            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
                 {/* Header */}
-                <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/40">
                     <div>
-                        <h2 className="text-xl font-bold text-slate-900">Select Payment</h2>
-                        <p className="text-xs text-slate-500 font-medium">
-                            {isDineIn ? "Dine-in Table" : orderType === "takeaway" ? "Takeaway Order" : "Delivery Order"}
+                        <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">
+                            {activeTab === "Cash" ? "Cash Payment" : activeTab === "Split" ? "Split Payment" : "Card Payment"}
+                        </h2>
+                        <p className="text-xs font-semibold text-slate-400 capitalize mt-1.5">
+                            {orderType} Order
                         </p>
                     </div>
                     <button
-                        onClick={handleModalClose}
-                        className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors cursor-pointer"
+                        onClick={onClose}
+                        className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
                     >
-                        <X className="w-5 h-5" />
+                        <X className="w-4 h-4" />
                     </button>
                 </div>
 
                 <div className="p-6 space-y-4">
-                    {/* Amount Due Display */}
-                    <div className="text-center mb-2">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Amount Due</p>
-                        <p className="text-3xl font-black text-slate-900 tracking-tight">
-                            {currencySymbol} {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
+                    {/* Amount Due Banner */}
+                    <div className="text-center py-2 bg-slate-50/60 rounded-2xl border border-slate-100">
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-1">
+                            Amount Due
+                        </span>
+                        <span className="text-3xl font-black text-slate-900 tracking-tight">
+                            {currencySymbol} {totalAmount.toLocaleString()}
+                        </span>
                     </div>
 
-                    {/* View 1: Main Options (Cash, Card, Split තෝරන ප්‍රධාන මෙනුව) */}
-                    {viewMode === "options" && (
-                        <div className="space-y-3">
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("cash")}
-                                className="w-full py-4 px-4 bg-white border-2 border-orange-200 hover:border-orange-500 hover:bg-orange-50 rounded-2xl flex items-center justify-between transition-all shadow-sm cursor-pointer active:scale-95 group"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl">💵</span>
-                                    <span className="font-bold text-base text-slate-800 group-hover:text-orange-600">Cash Payment</span>
-                                </div>
-                                <span className="text-xs font-bold text-orange-600 bg-orange-100/70 px-2.5 py-1 rounded-lg">Auto Open</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => onConfirmPayment("Card")}
-                                disabled={isSubmitting}
-                                className="w-full py-4 px-4 bg-white border-2 border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50 rounded-2xl flex items-center justify-between transition-all shadow-sm cursor-pointer active:scale-95 group disabled:opacity-50"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl">💳</span>
-                                    <span className="font-bold text-base text-slate-800 group-hover:text-indigo-600">Card Payment</span>
-                                </div>
-                                <span className="text-xs font-bold text-indigo-600 bg-indigo-100/70 px-2.5 py-1 rounded-lg">No Drawer</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("split")}
-                                className="w-full py-4 px-4 bg-slate-50 border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 rounded-2xl flex items-center justify-between transition-all shadow-sm cursor-pointer active:scale-95 group"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl">🍕</span>
-                                    <span className="font-bold text-base text-slate-800 group-hover:text-emerald-700">Split (Cash + Card)</span>
-                                </div>
-                                <span className="text-xs font-bold text-emerald-700 bg-emerald-100/70 px-2.5 py-1 rounded-lg">Custom</span>
-                            </button>
-                        </div>
-                    )}
-
-                    {/* View 2: Cash Calculator */}
-                    {viewMode === "cash" && (
-                        <form
-                            className="space-y-4 animate-in fade-in duration-200"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                const tendered = cashGiven ? Number(cashGiven) : totalAmount;
-                                if (tendered < totalAmount) return;
-                                const change = tendered - totalAmount;
-                                onConfirmPayment("Cash", String(tendered), change);
-                            }}
-                        >
+                    {/* CASH VIEW */}
+                    {activeTab === "Cash" && (
+                        <form onSubmit={handleCashSubmit} className="space-y-3.5">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
                                     Cash Received
                                 </label>
                                 <input
+                                    ref={inputRef}
                                     type="number"
                                     placeholder="Enter amount"
-                                    value={cashGiven}
-                                    onChange={(e) => setCashGiven(e.target.value)}
-                                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-3 font-bold text-slate-900 focus:border-orange-500 outline-none text-center text-xl shadow-inner"
-                                    autoFocus
+                                    value={cashTendered}
+                                    onChange={(e) => setCashTendered(e.target.value)}
+                                    className="w-full bg-white border-2 border-orange-500 rounded-2xl py-3 px-4 text-center font-black text-xl text-slate-900 placeholder:text-slate-300 outline-none shadow-[0_0_12px_rgba(249,115,22,0.15)]"
                                 />
                             </div>
 
+                            {/* Quick Amount Suggestion Buttons */}
                             <div className="grid grid-cols-2 gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setCashGiven(String(totalAmount))}
-                                    className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer"
+                                    onClick={() => setCashTendered(String(totalAmount))}
+                                    className="py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 transition-all cursor-pointer"
                                 >
-                                    Exact ({Math.round(totalAmount).toLocaleString()})
+                                    Exact ({totalAmount.toLocaleString()})
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setCashGiven(String(Math.ceil(totalAmount / 500) * 500))}
-                                    className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer"
+                                    onClick={() => setCashTendered(String(Math.ceil(totalAmount / 500) * 500))}
+                                    className="py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 transition-all cursor-pointer"
                                 >
                                     Nearest 500
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setCashGiven("1000")}
-                                    className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer"
+                                    onClick={() => setCashTendered("1000")}
+                                    className="py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 transition-all cursor-pointer"
                                 >
                                     1,000
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setCashGiven("5000")}
-                                    className="py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer"
+                                    onClick={() => setCashTendered("5000")}
+                                    className="py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 transition-all cursor-pointer"
                                 >
                                     5,000
                                 </button>
                             </div>
 
-                            <div className="p-3 rounded-xl border border-slate-200">
-                                {Number(cashGiven || 0) >= totalAmount ? (
-                                    <div className="text-center text-emerald-600 bg-emerald-50 p-2 rounded-lg border border-emerald-100">
-                                        <span className="block text-[10px] font-bold uppercase tracking-wider mb-0.5">Change to Return</span>
-                                        <span className="font-black text-xl">
-                                            {currencySymbol} {(Number(cashGiven) - totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <div className="text-center text-rose-500 bg-rose-50 p-2 rounded-lg border border-rose-100">
-                                        <span className="block text-[10px] font-bold uppercase tracking-wider mb-0.5">Remaining Due</span>
-                                        <span className="font-bold text-lg">
-                                            {currencySymbol} {(totalAmount - Number(cashGiven || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
+                            {/* Change / Remaining Alert Box */}
+                            {changeToReturn > 0 ? (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                                    <span className="text-[10px] font-black uppercase text-emerald-600 block">Change to Return</span>
+                                    <span className="text-xl font-black text-emerald-700">
+                                        {currencySymbol} {changeToReturn.toLocaleString()}
+                                    </span>
+                                </div>
+                            ) : remainingDue > 0 && tenderedNumber > 0 ? (
+                                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-center">
+                                    <span className="text-[10px] font-black uppercase text-rose-500 block">Remaining Due</span>
+                                    <span className="text-xl font-black text-rose-600">
+                                        {currencySymbol} {remainingDue.toLocaleString()}
+                                    </span>
+                                </div>
+                            ) : null}
 
                             <button
                                 type="submit"
-                                disabled={isSubmitting || cashGiven === "" || cashNum < totalAmount}
-                                className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold rounded-2xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-base"
+                                disabled={isSubmitting}
+                                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/25 active:scale-95 cursor-pointer disabled:opacity-50"
                             >
-                                <CheckCircle className="w-5 h-5" />
-                                {isSubmitting ? "Processing..." : "Confirm & Open Drawer"}
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("options")}
-                                className="w-full py-1 text-slate-400 hover:text-slate-600 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
-                            >
-                                <ArrowLeft className="w-3.5 h-3.5" /> Back to Payment Methods
+                                {isSubmitting ? "Processing..." : "Confirm & Open Drawer (Enter)"}
                             </button>
                         </form>
                     )}
 
-                    {/* View 3: Split Payment */}
-                    {viewMode === "split" && (
-                        <form
-                            className="space-y-4 animate-in fade-in duration-200"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                if (isSplitInvalid || isSubmitting) return;
-                                const card = Math.max(0, totalAmount - splitCashNum);
-                                onConfirmPayment(`Split (Cash: ${splitCashNum}, Card: ${card})`, String(splitCashNum), 0);
-                            }}
-                        >
+                    {/* SPLIT VIEW */}
+                    {activeTab === "Split" && (
+                        <form onSubmit={handleSplitSubmit} className="space-y-3.5">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
                                     Cash Amount Received
                                 </label>
                                 <input
+                                    ref={inputRef}
                                     type="number"
                                     placeholder="Enter amount in Cash"
-                                    value={splitCashAmount}
-                                    onChange={(e) => setSplitCashAmount(e.target.value)}
-                                    className={`w-full rounded-xl p-3 font-black text-slate-900 outline-none text-center text-xl shadow-inner transition-all border-2 ${isSplitCashExceeded
-                                        ? "border-rose-500 bg-rose-50/70 text-rose-700 animate-shake ring-4 ring-rose-500/20"
-                                        : "border-slate-200 bg-slate-50 focus:border-orange-500 focus:bg-white"
-                                        }`}
-                                    autoFocus
+                                    value={splitCash}
+                                    onChange={(e) => setSplitCash(e.target.value)}
+                                    className="w-full bg-white border-2 border-orange-500 rounded-2xl py-3 px-4 text-center font-black text-xl text-slate-900 placeholder:text-slate-300 outline-none shadow-[0_0_12px_rgba(249,115,22,0.15)]"
                                 />
                             </div>
 
-                            {isSplitCashExceeded ? (
-                                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-center text-rose-600 animate-in slide-in-from-top-1">
-                                    <p className="text-xs font-bold">⚠️ Cash amount cannot exceed total amount!</p>
-                                    <p className="text-[10px] text-rose-500 mt-0.5 font-medium">Use Full Cash payment instead.</p>
-                                </div>
-                            ) : (
-                                <div className="p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl flex justify-between items-center text-indigo-900">
-                                    <span className="font-bold text-xs uppercase tracking-wider">Card Amount:</span>
-                                    <span className="font-black text-lg text-indigo-700">
-                                        {currencySymbol} {Math.max(0, totalAmount - splitCashNum).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            )}
+                            <div className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex justify-between items-center">
+                                <span className="text-xs font-bold text-indigo-700">Card Amount:</span>
+                                <span className="text-lg font-black text-indigo-900">
+                                    {currencySymbol} {splitCardAmount.toLocaleString()}
+                                </span>
+                            </div>
 
                             <button
                                 type="submit"
-                                disabled={isSplitInvalid || isSubmitting}
-                                className={`w-full py-4 font-bold rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-base ${isSplitInvalid
-                                    ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                                    : "bg-emerald-500 hover:bg-emerald-600 text-white active:scale-95 cursor-pointer shadow-emerald-500/20"
-                                    }`}
+                                disabled={isSubmitting || splitCashNumber <= 0}
+                                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-95 cursor-pointer disabled:opacity-50"
                             >
-                                {isSubmitting ? "Processing..." : "Confirm Split & Open Drawer"}
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("options")}
-                                className="w-full py-1 text-slate-400 hover:text-slate-600 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
-                            >
-                                <ArrowLeft className="w-3.5 h-3.5" /> Back to Payment Methods
+                                {isSubmitting ? "Processing..." : "Confirm Split & Open Drawer (Enter)"}
                             </button>
                         </form>
                     )}
+
+                    {/* Switch Payment Method Links */}
+                    <div className="pt-2 flex justify-center gap-4 text-xs font-bold text-slate-400">
+                        {activeTab !== "Cash" && (
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab("Cash")}
+                                className="hover:text-slate-700 cursor-pointer flex items-center gap-1"
+                            >
+                                <Banknote className="w-3.5 h-3.5" /> Pay with Cash
+                            </button>
+                        )}
+                        {activeTab !== "Split" && (
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab("Split")}
+                                className="hover:text-slate-700 cursor-pointer flex items-center gap-1"
+                            >
+                                <Split className="w-3.5 h-3.5" /> Split Payment
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { supabase } from "@/lib/supabase";
 import { useSettings } from "@/context/SettingsContext";
 
-import { TrendingUp, CreditCard, CheckCircle, Receipt, ArrowUpRight, Clock, Coffee, PieChart, ShoppingBag, X, Search, Eye, Printer, Flame, Utensils, Moon } from "lucide-react";
+import { TrendingUp, CreditCard, CheckCircle, Receipt, ArrowUpRight, Clock, Coffee, PieChart, ShoppingBag, X, Search, Eye, Printer, Flame, Utensils, Moon, Lock, ShieldAlert, AlertTriangle } from "lucide-react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Navbar } from "@/components/Navbar";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -141,6 +141,36 @@ export default function AnalyticsPage() {
   const [customDate, setCustomDate] = useState<string>(getTodayLocalDateString());
   const [isLoading, setIsLoading] = useState(true);
 
+  // Manager Access Security for Date Range
+  const [isManagerUnlocked, setIsManagerUnlocked] = useState(false);
+  const [showManagerPinModal, setShowManagerPinModal] = useState(false);
+  const [pendingRange, setPendingRange] = useState<"Week" | "Month" | "Year" | "Custom" | null>(null);
+  const [managerPinInput, setManagerPinInput] = useState("");
+  const [managerPinError, setManagerPinError] = useState("");
+  const [isCheckingPin, setIsCheckingPin] = useState(false);
+  const [failedPinAttempts, setFailedPinAttempts] = useState(0);
+  const [lockoutSecs, setLockoutSecs] = useState(0);
+
+  // Lockout check
+  useEffect(() => {
+    const checkLock = () => {
+      const lockedUntil = localStorage.getItem("analytics_manager_locked_until");
+      if (lockedUntil) {
+        const remaining = Math.ceil((parseInt(lockedUntil, 10) - Date.now()) / 1000);
+        if (remaining > 0) {
+          setLockoutSecs(remaining);
+        } else {
+          localStorage.removeItem("analytics_manager_locked_until");
+          setLockoutSecs(0);
+          setFailedPinAttempts(0);
+        }
+      }
+    };
+    checkLock();
+    const t = setInterval(checkLock, 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const [transactionSearch, setTransactionSearch] = useState("");
   const [transactionDateFilter, setTransactionDateFilter] = useState<"Today" | "Yesterday" | "Last 7 Days" | "Custom Date">("Today");
   const [customDateRange, setCustomDateRange] = useState({ start: "", end: "" });
@@ -189,7 +219,7 @@ export default function AnalyticsPage() {
     setIsMounted(true);
   }, []);
 
-  const isAnyModalOpen = Boolean(viewingOrder || voidModalOpen || returnModalOpen || showShiftSuccess);
+  const isAnyModalOpen = Boolean(viewingOrder || voidModalOpen || returnModalOpen || showShiftSuccess || showManagerPinModal);
   useEffect(() => {
     if (isAnyModalOpen) {
       document.body.style.overflow = "hidden";
@@ -295,6 +325,79 @@ export default function AnalyticsPage() {
       };
     }
   }, [printOrder]);
+
+  // Handle Date Filter Selection with Manager Access Check
+  const handleRangeTabClick = (range: "Today" | "Week" | "Month" | "Year" | "Custom") => {
+    if (range === "Today") {
+      setTimeFilter("Today");
+      return;
+    }
+
+    if (isManagerUnlocked) {
+      setTimeFilter(range);
+      return;
+    }
+
+    setPendingRange(range);
+    setManagerPinInput("");
+    setManagerPinError("");
+    setShowManagerPinModal(true);
+  };
+
+  // Strictly verify against restaurant_settings.admin_pin with ZERO hardcoding
+  const handleVerifyManagerPin = async () => {
+    if (!managerPinInput || !pendingRange || lockoutSecs > 0) return;
+    setIsCheckingPin(true);
+    setManagerPinError("");
+
+    try {
+      const { data, error } = await supabase
+        .from("restaurant_settings")
+        .select("admin_pin")
+        .single();
+
+      if (error || !data) {
+        setManagerPinError("Database verification failed. Please try again.");
+        setIsCheckingPin(false);
+        return;
+      }
+
+      const dbAdminPin = data.admin_pin ? String(data.admin_pin).trim() : null;
+      const enteredPin = managerPinInput.trim();
+
+      if (!dbAdminPin || enteredPin !== dbAdminPin) {
+        const nextAttempts = failedPinAttempts + 1;
+        setFailedPinAttempts(nextAttempts);
+
+        if (nextAttempts >= 3) {
+          const lockTime = Date.now() + 120000;
+          localStorage.setItem("analytics_manager_locked_until", lockTime.toString());
+          setLockoutSecs(120);
+          setManagerPinError("Too many incorrect attempts! Locked for 2 minutes.");
+        } else {
+          setManagerPinError(`Incorrect Manager PIN! Attempt ${nextAttempts} of 3.`);
+        }
+
+        setManagerPinInput("");
+        setIsCheckingPin(false);
+        return;
+      }
+
+      // Success
+      setFailedPinAttempts(0);
+      localStorage.removeItem("analytics_manager_locked_until");
+      setIsManagerUnlocked(true);
+      setTimeFilter(pendingRange);
+      setShowManagerPinModal(false);
+      setManagerPinInput("");
+      setPendingRange(null);
+      showToast("Manager access granted.", "success");
+    } catch (err: any) {
+      setManagerPinError("Verification error: " + (err.message || "Unknown error"));
+    } finally {
+      setIsCheckingPin(false);
+    }
+  };
 
   const orders = useMemo(() => {
     const now = new Date();
@@ -525,7 +628,6 @@ export default function AnalyticsPage() {
   });
   const topItems = Object.values(itemMap).sort((a, b) => b.qty - a.qty).slice(0, 5);
 
-  // Dynamic Sales Hours: පලමු sale එකේ සිට අවසාන sale එක දක්වා පමණක් chart එකට ගැනීම
   const hourlyData = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, i) => ({
       hour: i,
@@ -554,12 +656,10 @@ export default function AnalyticsPage() {
       }
     });
 
-    // කිසිදු sale එකක් නැතිනම් දහවල් කාලය පමණක් පෙන්වයි
     if (maxHourWithSale === -1) {
       return buckets.slice(10, 22);
     }
 
-    // පළමු sale එකේ සිට අවසාන sale එක දක්වා පැය පෙළගස්වයි
     return buckets.slice(minHourWithSale, maxHourWithSale + 1);
   }, [orders]);
 
@@ -604,6 +704,93 @@ export default function AnalyticsPage() {
           <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[110] animate-in fade-in slide-in-from-top-4 flex items-center gap-2 px-6 py-3 rounded-full shadow-2xl font-bold text-sm bg-slate-900 text-white pointer-events-none">
             {toastMessage.type === "success" ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <X className="w-4 h-4 text-rose-400" />}
             {toastMessage.text}
+          </div>
+        )}
+
+        {/* Manager PIN Authorization Modal for Historical Analytics */}
+        {showManagerPinModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 max-w-xs w-full animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2 text-slate-900 font-black text-sm">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${lockoutSecs > 0
+                      ? "bg-rose-500 text-white border-rose-600 animate-pulse"
+                      : "bg-orange-50 text-orange-600 border-orange-100"
+                    }`}>
+                    {lockoutSecs > 0 ? <ShieldAlert className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                  </div>
+                  <span>Manager Access</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowManagerPinModal(false);
+                    setPendingRange(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-full cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mb-3">
+                Manager PIN required to access historical data ({pendingRange === "Year" ? "This Year" : pendingRange}).
+              </p>
+
+              {lockoutSecs > 0 ? (
+                <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 text-center my-2 animate-in fade-in">
+                  <AlertTriangle className="w-6 h-6 text-rose-500 mx-auto mb-1.5" />
+                  <p className="text-xs font-black text-rose-800 uppercase tracking-wider">Access Locked</p>
+                  <p className="text-xl font-black font-mono text-rose-600 mt-1">
+                    0{Math.floor(lockoutSecs / 60)}:{(lockoutSecs % 60).toString().padStart(2, "0")}
+                  </p>
+                  <p className="text-[11px] font-bold text-rose-600 mt-1">Please wait for cooldown.</p>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleVerifyManagerPin();
+                  }}
+                >
+                  <input
+                    type="password"
+                    autoFocus
+                    maxLength={6}
+                    placeholder="••••"
+                    value={managerPinInput}
+                    onChange={(e) => setManagerPinInput(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl py-3 px-4 text-center tracking-[0.4em] text-2xl font-black text-slate-900 outline-none focus:border-orange-500 focus:bg-white transition-all mb-2"
+                  />
+
+                  {managerPinError && (
+                    <p className="text-rose-500 text-xs font-bold text-center mb-3">
+                      {managerPinError}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowManagerPinModal(false);
+                        setPendingRange(null);
+                      }}
+                      className="py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCheckingPin || !managerPinInput}
+                      className="py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition-all shadow-md shadow-orange-500/20 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isCheckingPin ? "Verifying..." : "Unlock"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         )}
 
@@ -655,19 +842,25 @@ export default function AnalyticsPage() {
               <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">Analytics Dashboard</h1>
               <p className="text-slate-500 text-sm mt-1.5 tracking-wide font-medium">Live overview of your restaurant&apos;s performance</p>
             </div>
+
+            {/* Filter Pills with Manager Lock indicators */}
             <div className="flex bg-white rounded-2xl p-1.5 shadow-sm border border-slate-200 overflow-x-auto no-scrollbar w-full sm:w-auto items-center">
-              {["Today", "Week", "Month", "Year", "Custom"].map((tf) => (
-                <button
-                  key={tf}
-                  onClick={() => setTimeFilter(tf as any)}
-                  className={`flex-1 sm:flex-none text-center px-3 sm:px-5 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap tracking-wide ${timeFilter === tf
-                    ? "bg-slate-900 text-white shadow-md"
-                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                    }`}
-                >
-                  {tf === "Year" ? "This Year" : tf}
-                </button>
-              ))}
+              {(["Today", "Week", "Month", "Year", "Custom"] as const).map((tf) => {
+                const isLocked = tf !== "Today" && !isManagerUnlocked;
+                return (
+                  <button
+                    key={tf}
+                    onClick={() => handleRangeTabClick(tf)}
+                    className={`flex-1 sm:flex-none text-center px-3 sm:px-5 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap tracking-wide flex items-center justify-center gap-1.5 cursor-pointer ${timeFilter === tf
+                        ? "bg-slate-900 text-white shadow-md"
+                        : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      }`}
+                  >
+                    <span>{tf === "Year" ? "This Year" : tf}</span>
+                    {isLocked && <Lock className="w-3 h-3 opacity-40" />}
+                  </button>
+                );
+              })}
               {timeFilter === "Custom" && (
                 <input
                   type="date"
@@ -705,7 +898,7 @@ export default function AnalyticsPage() {
                       setPrintOrder(null);
                       setTimeout(() => window.print(), 50);
                     }}
-                    className="bg-indigo-500 hover:bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-500/20 transition-all active:scale-95 whitespace-nowrap shrink-0"
+                    className="bg-indigo-500 hover:bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-500/20 transition-all active:scale-95 whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     <Receipt className="w-5 h-5" /> Print Z-Report
                   </button>
@@ -805,7 +998,7 @@ export default function AnalyticsPage() {
                     <button
                       onClick={handleSubmitShift}
                       disabled={isSubmittingShift}
-                      className="mt-4 w-full py-3.5 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 tracking-wide text-sm sm:text-base"
+                      className="mt-4 w-full py-3.5 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 tracking-wide text-sm sm:text-base cursor-pointer"
                     >
                       {isSubmittingShift ? (
                         <>
@@ -860,7 +1053,7 @@ export default function AnalyticsPage() {
                                     setReturnError("");
                                     setReturnModalOpen(true);
                                   }}
-                                  className="text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg font-bold text-xs transition-colors flex items-center gap-1"
+                                  className="text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg font-bold text-xs transition-colors flex items-center gap-1 cursor-pointer"
                                 >
                                   🔄 Return
                                 </button>
@@ -869,7 +1062,7 @@ export default function AnalyticsPage() {
                                     setVoidTargetId(log.id);
                                     setVoidModalOpen(true);
                                   }}
-                                  className="text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg font-bold text-xs transition-colors"
+                                  className="text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg font-bold text-xs transition-colors cursor-pointer"
                                 >
                                   Void
                                 </button>
@@ -1160,9 +1353,9 @@ export default function AnalyticsPage() {
                       <YAxis
                         axisLine={false}
                         tickLine={false}
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
                         width={58}
                         domain={[0, 'auto']}
-                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
                         tickFormatter={(val) => {
                           if (val === 0) return `0`;
                           if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
@@ -1218,7 +1411,7 @@ export default function AnalyticsPage() {
                       <button
                         key={opt}
                         onClick={() => setTransactionDateFilter(opt as any)}
-                        className={`flex-1 sm:flex-none text-center px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${transactionDateFilter === opt ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                        className={`flex-1 sm:flex-none text-center px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${transactionDateFilter === opt ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                           }`}
                       >
                         {opt}
@@ -1285,14 +1478,14 @@ export default function AnalyticsPage() {
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 onClick={() => setViewingOrder(order)}
-                                className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 flex items-center justify-center transition-all shadow-sm"
+                                className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 flex items-center justify-center transition-all shadow-sm cursor-pointer"
                                 title="View Bill"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => setPrintOrder(order)}
-                                className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300 flex items-center justify-center transition-all shadow-sm"
+                                className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300 flex items-center justify-center transition-all shadow-sm cursor-pointer"
                                 title="Re-Print Slip"
                               >
                                 <Printer className="w-4 h-4" />
@@ -1330,7 +1523,7 @@ export default function AnalyticsPage() {
                 </div>
                 <button
                   onClick={() => setViewingOrder(null)}
-                  className="w-10 h-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors shadow-sm"
+                  className="w-10 h-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors shadow-sm cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1387,7 +1580,7 @@ export default function AnalyticsPage() {
                     setPrintOrder(viewingOrder);
                     setViewingOrder(null);
                   }}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg active:scale-95"
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg active:scale-95 cursor-pointer"
                 >
                   <Printer className="w-5 h-5" /> Print Duplicate Receipt
                 </button>
@@ -1413,7 +1606,7 @@ export default function AnalyticsPage() {
                 <button
                   type="button"
                   onClick={() => { setVoidModalOpen(false); setVoidTargetId(null); setVoidForm({ managerPin: "", reason: "" }); setVoidError(""); setShakePin(false); }}
-                  className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors"
+                  className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1510,7 +1703,7 @@ export default function AnalyticsPage() {
                 <button
                   type="submit"
                   disabled={!voidForm.reason || !voidForm.managerPin || isLoading}
-                  className="w-full py-4 mt-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-[0_8px_20px_rgba(225,29,72,0.3)]"
+                  className="w-full py-4 mt-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-[0_8px_20px_rgba(225,29,72,0.3)] cursor-pointer"
                 >
                   {isLoading ? "Processing..." : "Confirm Void Entry"}
                 </button>
@@ -1546,7 +1739,7 @@ export default function AnalyticsPage() {
                     setReturnError("");
                     setShakeReturn(false);
                   }}
-                  className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors"
+                  className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
