@@ -65,7 +65,7 @@ export const TablesGrid: React.FC<TablesGridProps> = ({
     const activeDineInCount = tables.filter((t) =>
         orders.some(
             (o) =>
-                o.table_no === String(t.id) &&
+                String(o.table_no) === String(t.id) &&
                 (!o.order_type || o.order_type === "dine-in") &&
                 o.status?.toLowerCase() !== "completed"
         )
@@ -126,85 +126,85 @@ export const TablesGrid: React.FC<TablesGridProps> = ({
                 </div>
             </div>
 
-            {/* Grid Content */}
+            {/* Grid Content -     ,     Compact Grid     */}
             {activeViewTab === "tables" ? (
-                <div className="flex-1 p-2.5 bg-slate-50/20 overflow-y-auto no-scrollbar flex flex-col justify-between">
-                    {/* Responsive Layout: Mobile gets 2 or 3 columns with scrolling; PC gets the exact original auto-rows-fr 4-column compact grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 min-[1024px]:grid-cols-4 gap-2 h-full min-[1024px]:auto-rows-fr">
+                <div className="flex-1 p-2 bg-slate-100/60 overflow-y-auto no-scrollbar flex flex-col justify-between">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 min-[1024px]:grid-cols-3 gap-1.5 h-full min-[1024px]:auto-rows-fr">
                         {tables.map((tableObj) => {
                             const tableNo = String(tableObj.id);
                             const activeOrder = orders.find(
                                 (o) =>
-                                    o.table_no === tableNo &&
+                                    String(o.table_no) === tableNo &&
                                     (!o.order_type || o.order_type === "dine-in") &&
                                     o.status?.toLowerCase() !== "completed"
                             );
 
+                            // Active / Bill Printed / Ready  
                             if (activeOrder) {
                                 const isSelected = selectedOrderId === activeOrder.id;
                                 const isReady = activeOrder.status?.toLowerCase() === "ready";
-                                const isWaitingPayment = waitingPaymentTableNos.has(tableNo);
+
+                                const isWaitingPayment =
+                                    waitingPaymentTableNos.has(tableNo) ||
+                                    (activeOrder as any).is_bill_printed === true ||
+                                    String(activeOrder.status || "").toLowerCase() === "waiting_payment";
 
                                 return (
                                     <button
                                         key={tableNo}
                                         type="button"
                                         onClick={() => onSelectOrder(activeOrder.id)}
-                                        className={`w-full h-full rounded-2xl p-1.5 flex flex-col justify-between items-center text-center cursor-pointer transition-all active:scale-95 min-h-[64px] ${isWaitingPayment
-                                            ? "bg-purple-50 hover:bg-purple-100/90 text-purple-900 border-2 border-purple-400/80 shadow-[0_0_14px_rgba(168,85,247,0.25)] animate-pulse"
+                                        className={`w-full h-full rounded-2xl p-2 flex flex-col justify-between items-center text-center cursor-pointer transition-all active:scale-95 min-h-[66px] border-0 outline-none focus:outline-none focus-visible:outline-none focus:ring-0 ${isWaitingPayment
+                                            ? `bg-[#8b5cf6] hover:bg-[#7c3aed] text-white shadow-md shadow-purple-500/20 ${isSelected ? "scale-[1.03] ring-2 ring-purple-300 z-10" : ""
+                                            }`
                                             : isReady
-                                                ? "bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 border-2 border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.22)] animate-pulse"
-                                                : isSelected
-                                                    ? "bg-orange-50 hover:bg-orange-100 text-orange-950 border-2 border-orange-500 shadow-[0_0_16px_rgba(249,115,22,0.3)] scale-[1.02]"
-                                                    : "bg-orange-50/80 hover:bg-orange-100/90 text-orange-900 border border-orange-300/80 shadow-[0_0_10px_rgba(249,115,22,0.14)]"
+                                                ? `bg-[#10b981] hover:bg-[#059669] text-white shadow-md shadow-emerald-500/20 ${isSelected ? "scale-[1.03] ring-2 ring-emerald-300 z-10" : ""
+                                                }`
+                                                : `bg-[#f97316] hover:bg-[#ea580c] text-white shadow-md shadow-orange-500/20 ${isSelected ? "scale-[1.03] ring-2 ring-orange-300 z-10" : ""
+                                                }`
                                             }`}
                                     >
-                                        <span
-                                            className={`font-black text-sm tracking-tight leading-none pt-0.5 ${isWaitingPayment
-                                                ? "text-purple-900"
-                                                : isReady
-                                                    ? "text-emerald-950"
-                                                    : "text-orange-950"
-                                                }`}
-                                        >
-                                            T{tableNo}
-                                        </span>
-                                        <span
-                                            className={`text-[8px] font-black uppercase tracking-wider leading-none px-1.5 py-0.5 rounded-full ${isWaitingPayment
-                                                ? "bg-purple-200/70 text-purple-900"
-                                                : isReady
-                                                    ? "bg-emerald-200/70 text-emerald-900"
-                                                    : "bg-orange-200/70 text-orange-900"
-                                                }`}
-                                        >
+                                        {/* Table No & Status Dot */}
+                                        <div className="w-full flex items-center justify-center relative pt-0.5">
+                                            <span className="font-black text-sm tracking-tight leading-none text-white drop-shadow-xs">
+                                                T{tableNo}
+                                            </span>
+                                            <span className="absolute right-1 w-2.5 h-2.5 rounded-full bg-white animate-pulse shadow-xs" />
+                                        </div>
+
+                                        {/* Status Text (BILL PRINTED / READY / ACTIVE) */}
+                                        <span className="text-[10px] font-black uppercase tracking-wider leading-none text-white/90 drop-shadow-xs">
                                             {isWaitingPayment
-                                                ? "🔔 WAITING BILL"
+                                                ? "Bill Printed"
                                                 : isReady
-                                                    ? "⭐ READY"
-                                                    : "ACTIVE"}
+                                                    ? "Ready"
+                                                    : "Active"}
                                         </span>
-                                        <span className="text-[10px] font-black leading-none pb-0.5 truncate w-full">
+
+                                        {/* Amount */}
+                                        <span className="text-[11px] font-black leading-none pb-0.5 truncate w-full text-white drop-shadow-xs">
                                             {currencySymbol}{" "}
-                                            {activeOrder.total_amount?.toLocaleString()}
+                                            {Number(activeOrder.total_amount || 0).toLocaleString()}
                                         </span>
                                     </button>
                                 );
                             }
 
+                            //  (FREE)  - Border  ,     
                             return (
                                 <button
                                     key={tableNo}
                                     type="button"
                                     onClick={() => onOpenManualModal(`dine-in-${tableNo}`)}
-                                    className="w-full h-full rounded-2xl p-1.5 flex flex-col justify-between items-center text-center cursor-pointer transition-all active:scale-95 border border-slate-200 bg-white hover:border-orange-300 hover:bg-orange-50/40 shadow-2xs group min-h-[64px]"
+                                    className="w-full h-full rounded-2xl p-2 flex flex-col justify-between items-center text-center cursor-pointer transition-all active:scale-95 border border-slate-300/80 bg-white hover:border-orange-400 hover:bg-orange-50/30 shadow-2xs group min-h-[66px] outline-none focus:outline-none focus:ring-0"
                                 >
-                                    <span className="font-black text-sm text-slate-700 group-hover:text-orange-600 tracking-tight leading-none pt-0.5">
+                                    <span className="font-black text-sm text-slate-800 group-hover:text-orange-600 tracking-tight leading-none pt-0.5">
                                         T{tableNo}
                                     </span>
-                                    <span className="text-[8px] font-bold text-slate-400 group-hover:text-orange-500 uppercase tracking-wider leading-none">
-                                        FREE
+                                    <span className="text-[10px] font-bold text-slate-400 group-hover:text-orange-500 uppercase tracking-wider leading-none">
+                                        Free
                                     </span>
-                                    <span className="text-[10px] font-black text-slate-300 group-hover:text-orange-600 leading-none pb-0.5">
+                                    <span className="text-[11px] font-bold text-orange-500 group-hover:text-orange-600 leading-none pb-0.5">
                                         + Open
                                     </span>
                                 </button>
@@ -231,10 +231,10 @@ export const TablesGrid: React.FC<TablesGridProps> = ({
                                 <div
                                     key={order.id}
                                     onClick={() => onSelectOrder(order.id)}
-                                    className={`p-3 rounded-2xl border transition-all flex justify-between items-center cursor-pointer ${isSelected
-                                        ? "border-orange-500 bg-orange-50/90 shadow-[0_0_12px_rgba(249,115,22,0.2)]"
+                                    className={`p-3 rounded-2xl border transition-all flex justify-between items-center cursor-pointer outline-none focus:outline-none ${isSelected
+                                        ? "border-orange-500 bg-orange-50/90 shadow-sm scale-[1.01]"
                                         : isReady
-                                            ? "border-emerald-300/80 bg-emerald-50/80 shadow-[0_0_12px_rgba(16,185,129,0.18)]"
+                                            ? "border-emerald-300 bg-emerald-50/80 shadow-2xs"
                                             : "border-slate-200 bg-white hover:border-orange-300 shadow-2xs"
                                         }`}
                                 >
@@ -263,7 +263,7 @@ export const TablesGrid: React.FC<TablesGridProps> = ({
                                     </div>
                                     <div className="text-right shrink-0">
                                         <span className="text-xs font-black text-orange-600 block">
-                                            {currencySymbol} {order.total_amount?.toLocaleString()}
+                                            {currencySymbol} {Number(order.total_amount || 0).toLocaleString()}
                                         </span>
                                         <span className="text-[9px] font-bold text-slate-400">
                                             <ElapsedTime startTime={order.created_at} />

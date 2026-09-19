@@ -163,7 +163,7 @@ export default function MobileCashierPage() {
         triggerSafePrint({ ...order, items: itemsToPrint }, true);
 
         const updatedItems = totalItems.map((i) => ({ ...i, kot_printed: true, prepared: false }));
-        await supabase.from("orders").update({ status: "Preparing", payment_method: "Cashier", items: updatedItems }).eq("id", order.id);
+        await supabase.from("orders").update({ status: "Preparing", payment_method: "Cashier", items: updatedItems, order_type: order.order_type || "dine-in" }).eq("id", order.id);
         fetchOrders();
     };
 

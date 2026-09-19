@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   MonitorDot, ChefHat, BarChart3, UtensilsCrossed, Settings, LogOut,
-  UserCircle, X, Check, Menu
+  X, Check, Menu, ShieldCheck, UserCircle
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
@@ -97,64 +97,60 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
     const day = date.toLocaleString("en-US", { day: "2-digit" });
     const month = date.toLocaleString("en-US", { month: "short" });
     const time = date.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
-    return `${weekday}, ${day} ${month} | ${time}`;
+    return `${weekday}, ${month} ${day} | ${time}`;
   };
 
-  const brandDisplayName = settings?.name || "Smart POS";
+  const brandDisplayName = settings?.name || "Restaurant POS";
 
   return (
     <>
       <nav
-        className={`fixed top-0 left-0 w-full z-40 transition-all duration-200 no-print flex items-center justify-between px-3 sm:px-4 h-16 select-none flex-nowrap ${scrolled
-            ? "bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs"
-            : "bg-white border-b border-slate-200/80"
+        className={`fixed top-0 left-0 w-full z-40 transition-all duration-200 no-print flex items-center justify-between px-2.5 sm:px-4 h-16 select-none flex-nowrap ${scrolled
+          ? "bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs"
+          : "bg-white border-b border-slate-200/80"
           }`}
       >
-        {/* Left Section: Logo, Role Badge & Always Visible Date/Time */}
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Logo & Compact Brand Name */}
-          <Link href="/cashier" className="flex items-center gap-2 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-orange-600 to-amber-500 text-white flex items-center justify-center shadow-xs shrink-0">
+        {/* Left Section: Logo, Primary Cashier & Date */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 min-w-0">
+
+          {/* Logo & Subtitle */}
+          <Link href="/cashier" className="flex items-center gap-2 shrink-0 group">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 text-white flex items-center justify-center shadow-md shadow-orange-500/30 shrink-0 group-hover:scale-105 transition-transform">
               <MonitorDot className="w-4.5 h-4.5 text-white" />
             </div>
-            <div className="hidden 2xl:flex flex-col min-w-0">
-              <h1 className="text-slate-900 font-extrabold text-sm leading-tight tracking-tight truncate">
+            <div className="flex flex-col min-w-0">
+              <h1 className="text-slate-900 font-black text-xs sm:text-sm leading-tight tracking-tight truncate">
                 Smart POS
               </h1>
-              <p className="text-[9px] text-orange-500 font-black uppercase tracking-wider truncate">
+              <p className="text-[9px] sm:text-[10px] text-orange-600 font-black uppercase tracking-wider truncate">
                 {brandDisplayName}
               </p>
             </div>
           </Link>
 
-          {/* Compact Role Badge with Tooltip */}
+          {/* PRIMARY CASHIER Badge (Mobile   Tab/Desktop  ) */}
           {mounted && isAuthenticated && (
             <div
               title={`Role: ${currentUser || "Primary Cashier"}`}
-              className="flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-xl bg-slate-50 border border-slate-200/90 text-slate-700 shadow-2xs shrink-0 cursor-default"
+              className="hidden lg:flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50/80 border border-emerald-300 text-emerald-800 shadow-2xs shrink-0 cursor-default"
             >
-              <div className="w-4 h-4 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                <UserCircle className="w-3 h-3" />
-              </div>
-              <div className="hidden xl:flex items-center gap-1 text-[11px] leading-none">
-                <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">ROLE</span>
-                <span className="font-bold text-slate-800 whitespace-nowrap">
-                  {currentUser || "Primary Cashier"}
-                </span>
-              </div>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="text-[11px] font-black uppercase tracking-wider whitespace-nowrap">
+                {currentUser || "PRIMARY CASHIER"}
+              </span>
             </div>
           )}
 
-          {/* Always Visible Date & Time (Never Collapses) */}
+          {/* Date & Time Pill (Mobile   Tab/Desktop  ) */}
           {mounted && (
-            <div className="flex items-center gap-1.5 h-8 px-2.5 rounded-xl bg-slate-50 border border-slate-200/90 text-[11px] font-bold text-slate-700 whitespace-nowrap shrink-0 shadow-2xs">
+            <div className="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-full bg-slate-50/80 border border-slate-200/90 text-[11px] font-bold text-slate-700 whitespace-nowrap shrink-0 shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
               <span>{formatDateTime(currentTime)}</span>
             </div>
           )}
         </div>
 
-        {/* Center Section: Compact Icon-Only Navigation (Hover shows Tooltip Name) */}
+        {/* Center Section: Navigation (Desktop Only) */}
         <div className="hidden md:flex items-center justify-center absolute left-1/2 -translate-x-1/2">
           <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-2xl border border-slate-200/70 shadow-2xs">
             {visibleLinks.map((link) => {
@@ -164,14 +160,13 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
                 <Link
                   key={link.href}
                   href={link.href}
-                  title={link.label} // Mouse hover කළ විට නම පෙන්වයි
+                  title={link.label}
                   className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${isActive
-                      ? "bg-white text-orange-600 shadow-xs scale-[1.02]"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+                    ? "bg-white text-orange-600 shadow-xs scale-[1.02]"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
                     }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  {/* Full HD / 2XL තිරවලදී පමණක් Text එක දිස්වේ; සාමාන්‍ය ලැප්ටොප් වලදී Icon එක පමණි */}
                   <span className="hidden 2xl:inline">{link.label}</span>
                 </Link>
               );
@@ -179,27 +174,29 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Right Section: Page Actions & Log Out */}
+        {/* Right Section: Buttons, Logout & Mobile Hamburger Button */}
         <div className="flex items-center justify-end gap-1.5 sm:gap-2 shrink-0 ml-auto">
           {rightActions}
 
+          {/* Logout Button (Screenshot  ) */}
           {mounted && isAuthenticated && (
             <button
               onClick={() => setShowLogoutConfirm(true)}
               title="Log Out"
-              className="h-8 w-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200/80 hover:border-rose-200 transition-all shrink-0 bg-slate-50 active:scale-95 cursor-pointer shadow-2xs"
+              className="h-8 sm:h-9 w-8 sm:w-9 flex items-center justify-center rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200/90 hover:border-rose-200 transition-all shrink-0 bg-white active:scale-95 cursor-pointer shadow-2xs"
             >
-              <LogOut className="w-3.5 h-3.5 stroke-[2]" />
+              <LogOut className="w-3.5 h-3.5 stroke-[2.2]" />
             </button>
           )}
 
-          {/* Mobile Hamburger Button */}
+          {/* Mobile Hamburger Button ( ) - Mobile      */}
           <button
+            type="button"
             onClick={() => setShowMobileNav(true)}
-            className="md:hidden h-8 w-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shrink-0 border border-slate-200 cursor-pointer"
+            className="md:hidden h-8 w-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition-all shrink-0 border border-slate-200 cursor-pointer"
             aria-label="Open navigation menu"
           >
-            <Menu className="w-4 h-4" />
+            <Menu className="w-4.5 h-4.5 stroke-[2.5]" />
           </button>
         </div>
       </nav>
@@ -254,8 +251,8 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
                     href={link.href}
                     onClick={() => setShowMobileNav(false)}
                     className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${isActive
-                        ? "bg-orange-50 text-orange-600 border border-orange-200 shadow-xs"
-                        : "text-slate-700 hover:bg-slate-50 border border-transparent"
+                      ? "bg-orange-50 text-orange-600 border border-orange-200 shadow-xs"
+                      : "text-slate-700 hover:bg-slate-50 border border-transparent"
                       }`}
                   >
                     <span className="text-base leading-none">{emoji}</span>
@@ -270,7 +267,7 @@ export function Navbar({ rightActions }: { rightActions?: React.ReactNode }) {
             {mounted && isAuthenticated && (
               <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3">
                 <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 shadow-xs">
-                  <UserCircle className="w-5 h-5 text-orange-500" />
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
                   <div>
                     <p className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Logged in as</p>
                     <p className="text-slate-800 font-bold">{currentUser || "Primary Cashier"}</p>

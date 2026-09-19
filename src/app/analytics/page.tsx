@@ -1857,7 +1857,7 @@ export default function AnalyticsPage() {
             <div className="text-center mb-3 pb-2 border-b-2 border-dashed border-black">
               <h1 className="text-lg font-black tracking-tight">{settings?.name || 'Restaurant POS'}</h1>
               <p className="text-[10px] uppercase font-bold tracking-widest">{settings?.tagline || 'Smart POS'}</p>
-              <p className="text-[10px]">Tel: {settings?.phone || '+94 77 123 4567'}</p>
+              <p className="text-[10px]">Tel: {settings?.phone || ''}</p>
               <p className="text-[10px] font-bold mt-1 uppercase">[ REPRINT BILL ]</p>
             </div>
 

@@ -368,12 +368,19 @@ function MenuContent() {
     const ticket = Math.floor(1000 + Math.random() * 9000).toString();
     setTicketNumber(ticket);
 
+    // ⚠️ KITCHEN FILTER: All QR-submitted items MUST have kot_printed: false
+    // so they are hidden from the Kitchen Display until the Cashier accepts them.
+    // kot_printed: undefined would evaluate as `undefined !== false` → true → bypasses filter!
     const cleanedCartItems = cart.map((item) => ({
       id: String(item.id),
       name: String(item.name),
       price: Number(item.price),
       quantity: Number(item.quantity),
-      notes: (item.notes || "").trim()
+      notes: (item.notes || "").trim(),
+      kot_printed: false,
+      is_new: true,
+      prepared: false,
+      added_at: new Date().toISOString()
     }));
 
     try {
@@ -390,13 +397,17 @@ function MenuContent() {
       if (activeOrders && activeOrders.length > 0) {
         const activeOrder = activeOrders[0];
         const existingItems = (activeOrder.items || []).map((item: any) => ({ ...item, prepared: item.prepared ?? false }));
+        // Add-on items: inherit kot_printed: false from cleanedCartItems
+        // (already set above, but be explicit for clarity)
         const newItems = cleanedCartItems.map((item) => ({
           ...item,
           is_new: true,
           prepared: false,
+          kot_printed: false,
           added_at: new Date().toISOString()
         }));
-        const mergedItems = [...existingItems, ...newItems];
+        //  add-on items   (kitchen screen   )
+        const mergedItems = [...newItems, ...existingItems];
 
         const mergedSubtotal = mergedItems.reduce((sum, it) => sum + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
         const discount = Number(activeOrder.discount || 0);
@@ -409,13 +420,21 @@ function MenuContent() {
           ? `${activeOrder.notes ? activeOrder.notes + " | " : ""}${cookingNotes}`
           : activeOrder.notes;
 
+        // ⚠️ CRITICAL FIX: If the order is already "Preparing" (visible on kitchen screen),
+        // NEVER downgrade it back to "pending" — the kitchen filters ONLY on "Preparing".
+        // Preserve the existing status; only fall back to "pending" for brand-new orders.
+        const preservedStatus =
+          ["preparing", "Preparing"].includes(activeOrder.status)
+            ? "Preparing"
+            : "pending";
+
         const { error: updateError } = await supabase
           .from("orders")
           .update({
             items: mergedItems,
             total_amount: Number(newTotalAmount),
             notes: combinedNotes,
-            status: "pending",
+            status: preservedStatus,
             updated_at: new Date().toISOString()
           })
           .eq("id", activeOrder.id);
@@ -426,10 +445,12 @@ function MenuContent() {
         }
         setPlacedOrderId(activeOrder.id);
       } else {
+        // Brand-new order: items also start with kot_printed: false
+        // (customer orders always wait for Cashier to accept before going to Kitchen)
         const payload = {
           table_no: tableNumber || "1",
           order_type: "dine-in",
-          items: cleanedCartItems,
+          items: cleanedCartItems,   // already has kot_printed: false from above
           total_amount: Number(cartGrandTotal),
           payment_method: "Pending",
           status: "pending",

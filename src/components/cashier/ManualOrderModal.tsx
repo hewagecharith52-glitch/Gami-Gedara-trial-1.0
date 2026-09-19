@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { X, Search, Star, ShoppingBag, Send, User, Minus, Plus } from "lucide-react";
-import MenuItemCard, { MenuItem as CardMenuItem } from "@/components/MenuItemCard";
 import { OrderItem, OrderType } from "./types";
 import { supabase } from "@/lib/supabase";
 
@@ -26,8 +25,8 @@ interface ManualOrderModalProps {
     isSubmitting: boolean;
 }
 
-const MENU_CACHE_KEY = "pos_cached_manual_menu_items";
-const FAST_MOVING_CACHE_KEY = "pos_cached_fast_moving_ids";
+const MENU_CACHE_KEY = "pos_cached_manual_menu_items_v4";
+const FAST_MOVING_CACHE_KEY = "pos_cached_fast_moving_ids_v4";
 
 export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     isOpen,
@@ -48,7 +47,6 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     const [customerName, setCustomerName] = useState(initialCustomerName);
     const [specialNotes, setSpecialNotes] = useState("");
 
-    // Instant load from Cache to eliminate 0-second loading lag
     const [dbMenu, setDbMenu] = useState<any[]>(() => {
         if (typeof window !== "undefined") {
             try {
@@ -86,11 +84,15 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     });
 
     useEffect(() => {
+        if (!isOpen) return;
         setOrderType(initialOrderType);
         setCustomerName(initialCustomerName);
-    }, [initialOrderType, initialCustomerName]);
+        setCart([]);
+        setSpecialNotes("");
+        setSearchQuery("");
+        setActiveCategory("All");
+    }, [isOpen, initialOrderType, initialCustomerName]);
 
-    // Fetch and sync menu data in the background without blocking the UI
     useEffect(() => {
         if (!isOpen) return;
 
@@ -129,10 +131,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                     data.forEach((order: any) => {
                         if (Array.isArray(order.items)) {
                             order.items.forEach((item: any) => {
-                                const rawName = String(item.name || "")
-                                    .replace(/\s*\((Regular\vert{}Large)\)\s*/gi, "")
-                                    .trim()
-                                    .toLowerCase();
+                                const rawName = String(item.name || "").trim().toLowerCase();
                                 const qty = Number(item.quantity || 1);
                                 if (rawName) itemSalesMap.set(rawName, (itemSalesMap.get(rawName) || 0) + qty);
                             });
@@ -172,69 +171,14 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
         });
     };
 
-    const groupedMenu = useMemo(() => {
-        const map = new Map<string, CardMenuItem>();
-        dbMenu.forEach((item) => {
-            const isRegular = item.name.includes("(Regular)");
-            const isLarge = item.name.includes("(Large)");
-            if (isRegular || isLarge) {
-                const baseName = item.name.replace(/\s*\((Regular\vert{}Large)\)\s*/gi, "").trim();
-                const groupKey = `${item.category}-${baseName}`;
-                if (!map.has(groupKey)) {
-                    map.set(groupKey, {
-                        id: item.id,
-                        name: baseName,
-                        description: item.description,
-                        price: Number(item.price),
-                        category: item.category,
-                        image_url: item.image_url,
-                        is_veg: item.is_veg,
-                        is_spicy: item.is_spicy,
-                        is_popular: item.is_popular,
-                        is_available: item.is_available,
-                    });
-                }
-                const existing = map.get(groupKey)!;
-                if (isLarge) {
-                    existing.large_item = {
-                        id: item.id,
-                        name: item.name,
-                        description: item.description,
-                        price: Number(item.price),
-                        category: item.category,
-                        image_url: item.image_url,
-                    };
-                } else if (isRegular) {
-                    existing.id = item.id;
-                    existing.name = item.name;
-                    existing.price = Number(item.price);
-                }
-            } else {
-                map.set(item.id, {
-                    id: item.id,
-                    name: item.name,
-                    description: item.description,
-                    price: Number(item.price),
-                    category: item.category,
-                    image_url: item.image_url,
-                    is_veg: item.is_veg,
-                    is_spicy: item.is_spicy,
-                    is_popular: item.is_popular,
-                    is_available: item.is_available,
-                });
-            }
-        });
-        return Array.from(map.values());
-    }, [dbMenu]);
-
     const filteredMenu = useMemo(() => {
-        let filtered = groupedMenu;
+        let filtered = dbMenu;
         if (activeCategory === "⭐ Favorites") {
             filtered = filtered.filter((item) => favoriteIds.includes(item.id));
         } else if (activeCategory === "🔥 Fast Moving") {
             filtered = filtered.filter((item) => {
-                const cleanBase = item.name.replace(/\s*\((Regular\vert{}Large)\)\s*/gi, "").trim().toLowerCase();
-                return fastMovingItemIds.slice(0, 10).some((name) => cleanBase.includes(name) || name.includes(cleanBase));
+                const cleanName = String(item.name || "").trim().toLowerCase();
+                return fastMovingItemIds.slice(0, 10).some((name) => cleanName.includes(name) || name.includes(cleanName));
             });
         } else if (activeCategory !== "All") {
             filtered = filtered.filter((item) => item.category === activeCategory);
@@ -244,20 +188,33 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
             filtered = filtered.filter((item) => item.name.toLowerCase().includes(q));
         }
         return filtered;
-    }, [activeCategory, searchQuery, groupedMenu, favoriteIds, fastMovingItemIds]);
+    }, [activeCategory, searchQuery, dbMenu, favoriteIds, fastMovingItemIds]);
 
     const menuCategories = useMemo(() => {
-        const cats = Array.from(new Set(groupedMenu.map((item) => item.category).filter(Boolean))).sort() as string[];
+        const cats = Array.from(new Set(dbMenu.map((item) => item.category).filter(Boolean))).sort() as string[];
         return ["All", "⭐ Favorites", "🔥 Fast Moving", ...cats];
-    }, [groupedMenu]);
+    }, [dbMenu]);
 
-    const handleAddCardToCart = (item: CardMenuItem, selectedSize: "Regular" | "Large", finalPrice: number) => {
-        const cleanBaseName = item.name.replace(/\s*\((Regular\vert{}Large)\)\s*/gi, "").trim();
-        const cartItemName = `${cleanBaseName} (${selectedSize})`;
+    const handleAddItemToCart = (item: any) => {
+        const itemName = item.name.trim();
+        const itemPrice = Number(item.price);
+
         setCart((prev) => {
-            const existing = prev.find((i) => i.name === cartItemName);
-            if (existing) return prev.map((i) => (i.name === cartItemName ? { ...i, quantity: i.quantity + 1 } : i));
-            return [...prev, { id: item.id, name: cartItemName, price: finalPrice, quantity: 1, notes: "", kot_printed: false }];
+            const existing = prev.find((i) => i.id === item.id || i.name === itemName);
+            if (existing) {
+                return prev.map((i) => (i.name === itemName ? { ...i, quantity: i.quantity + 1 } : i));
+            }
+            return [
+                ...prev,
+                {
+                    id: item.id,
+                    name: itemName,
+                    price: itemPrice,
+                    quantity: 1,
+                    notes: "",
+                    kot_printed: false,
+                },
+            ];
         });
     };
 
@@ -309,6 +266,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 lg:p-6 overflow-hidden">
             <div className="w-full max-w-7xl h-full sm:h-[90vh] bg-white rounded-none sm:rounded-3xl shadow-2xl flex flex-col lg:flex-row overflow-hidden border border-slate-200 relative">
                 <button
+                    type="button"
                     onClick={handleClose}
                     className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 z-40 transition-colors cursor-pointer"
                 >
@@ -327,8 +285,8 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                                 type="button"
                                 onClick={() => setActiveCategory(cat)}
                                 className={`text-left px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-between shrink-0 cursor-pointer ${activeCategory === cat
-                                    ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 scale-[1.01]"
-                                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                                        ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 scale-[1.01]"
+                                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                                     }`}
                             >
                                 <span className="truncate">{cat}</span>
@@ -337,7 +295,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                     </div>
                 </div>
 
-                {/* Dishes Grid */}
+                {/* Dishes List View */}
                 <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden border-b lg:border-b-0 lg:border-r border-slate-200">
                     <div className="p-3 sm:p-4 border-b border-slate-100 flex items-center gap-3 shrink-0">
                         <div className="relative flex-1">
@@ -353,35 +311,58 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                     </div>
 
                     <div className="flex-1 p-3 sm:p-4 overflow-y-auto bg-slate-50/40">
-                        {groupedMenu.length === 0 ? (
+                        {dbMenu.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                                 <div className="w-8 h-8 rounded-full border-2 border-slate-200 border-t-orange-500 animate-spin mb-2" />
                                 <span className="text-xs font-bold">Loading dishes...</span>
                             </div>
+                        ) : filteredMenu.length === 0 ? (
+                            <div className="text-center text-slate-400 py-12 text-xs font-bold">
+                                No items found
+                            </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            <div className="flex flex-col gap-2">
                                 {filteredMenu.map((item) => {
                                     const isFav = favoriteIds.includes(item.id);
+
                                     return (
-                                        <div key={item.id} className="relative group">
-                                            <button
-                                                type="button"
-                                                onClick={(e) => toggleFavorite(item.id, e)}
-                                                className={`absolute top-2 right-2 z-20 p-1.5 rounded-full transition-all cursor-pointer ${isFav
-                                                    ? "bg-amber-400 text-white shadow-xs"
-                                                    : "bg-white/90 text-slate-400 hover:text-amber-500"
-                                                    }`}
-                                            >
-                                                <Star
-                                                    className={`w-3.5 h-3.5 ${isFav ? "fill-white stroke-white" : "stroke-[2.5]"
-                                                        }`}
-                                                />
-                                            </button>
-                                            <MenuItemCard
-                                                item={item}
-                                                currencySymbol={currencySymbol}
-                                                onAddToCart={handleAddCardToCart}
-                                            />
+                                        <div
+                                            key={item.id}
+                                            className="bg-white border border-slate-200/80 hover:border-orange-300 rounded-xl px-3 py-2 flex items-center justify-between gap-2 shadow-2xs hover:shadow-xs transition-all group"
+                                        >
+                                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => toggleFavorite(item.id, e)}
+                                                    className="p-1 rounded-md text-slate-300 hover:text-amber-400 transition-colors shrink-0 cursor-pointer"
+                                                >
+                                                    <Star
+                                                        className={`w-3.5 h-3.5 ${isFav ? "fill-amber-400 stroke-amber-400" : "stroke-current"
+                                                            }`}
+                                                    />
+                                                </button>
+                                                <div className="min-w-0 flex-1">
+                                                    <h4 className="font-bold text-slate-800 text-xs truncate">
+                                                        {item.name}
+                                                    </h4>
+                                                    <span className="text-[10px] text-slate-400 font-semibold block truncate">
+                                                        {item.category}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Clean Single Clickable Price Button */}
+                                            <div className="flex items-center shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAddItemToCart(item)}
+                                                    className="px-3 py-2 bg-slate-100 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-300 border border-slate-200 rounded-lg transition-all active:scale-95 cursor-pointer"
+                                                >
+                                                    <span className="text-xs font-black text-slate-800 hover:text-orange-600 leading-tight block">
+                                                        {currencySymbol} {Number(item.price).toLocaleString()}
+                                                    </span>
+                                                </button>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -449,6 +430,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                                     </div>
                                     <div className="flex items-center gap-1.5 bg-slate-50 rounded-lg p-1 border border-slate-200 shrink-0">
                                         <button
+                                            type="button"
                                             onClick={() => updateCart(item, -1)}
                                             className="w-6 h-6 flex items-center justify-center bg-white rounded text-slate-700 shadow-2xs cursor-pointer"
                                         >
@@ -458,6 +440,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                                             {item.quantity}
                                         </span>
                                         <button
+                                            type="button"
                                             onClick={() => updateCart(item, 1)}
                                             className="w-6 h-6 flex items-center justify-center bg-orange-500 text-white rounded shadow-2xs cursor-pointer"
                                         >
@@ -484,6 +467,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                         </div>
                         <div className="flex flex-col gap-2">
                             <button
+                                type="button"
                                 onClick={() => handleTriggerSubmit(false)}
                                 disabled={isSubmitting || cart.length === 0}
                                 className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
@@ -492,6 +476,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
                                 <span>{isSubmitting ? "Processing..." : "Send to Kitchen (Print KOT)"}</span>
                             </button>
                             <button
+                                type="button"
                                 onClick={() => handleTriggerSubmit(true)}
                                 disabled={isSubmitting || cart.length === 0}
                                 className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs disabled:opacity-50 cursor-pointer"

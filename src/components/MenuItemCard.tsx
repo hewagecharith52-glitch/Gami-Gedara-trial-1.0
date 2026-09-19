@@ -155,7 +155,7 @@ function MenuItemCardComponent({ item, currencySymbol = "LKR", onAddToCart }: Me
 
                         <button
                             type="button"
-                            onClick={() => onAddToCart(activeItem, selectedSize, currentPrice)}
+                            onClick={() => onAddToCart(item, selectedSize, currentPrice)}
                             className="inline-flex items-center justify-center gap-1 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white text-[11px] sm:text-xs font-bold leading-none h-7 sm:h-8 px-2.5 sm:px-3 rounded-full transition-all shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
                         >
                             <Plus className="w-3.5 h-3.5 stroke-[2.8] shrink-0" />
@@ -280,7 +280,7 @@ function MenuItemCardComponent({ item, currencySymbol = "LKR", onAddToCart }: Me
                             <button
                                 type="button"
                                 onClick={() => {
-                                    onAddToCart(activeItem, selectedSize, currentPrice);
+                                    onAddToCart(item, selectedSize, currentPrice);
                                     setIsDetailOpen(false);
                                 }}
                                 className="w-full py-3 px-4 bg-orange-500 hover:bg-orange-600 active:scale-[0.98] text-white font-bold rounded-2xl shadow-lg shadow-orange-500/25 transition-all flex items-center justify-between cursor-pointer"

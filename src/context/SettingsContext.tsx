@@ -25,14 +25,14 @@ export interface RestaurantSettings {
 
 const defaultSettings: RestaurantSettings = {
   id: 1,
-  name: "Gravity House",
+  name: "Restaurant POS",
   tagline: "Smart POS",
   currency: "LKR",
   service_charge_pct: 10,
   tax_pct: 0,
   table_count: 12,
-  phone: "+94 77 123 4567",
-  address: "123 Main Street, Colombo",
+  phone: "",
+  address: "",
 };
 
 const SETTINGS_CACHE_KEY = "pos_cached_restaurant_settings";

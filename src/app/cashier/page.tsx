@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
-import { Clock, Receipt, Lock, X, CheckCircle } from "lucide-react";
+import { Clock, Receipt, X } from "lucide-react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import PaymentModal from "@/components/PaymentModal";
 import { useSettings } from "@/context/SettingsContext";
@@ -17,6 +17,8 @@ import { LiveOrdersWorkspace } from "@/components/cashier/LiveOrdersWorkspace";
 import { SettlementPanel } from "@/components/cashier/SettlementPanel";
 import { ManualOrderModal } from "@/components/cashier/ManualOrderModal";
 import { PettyCashModal } from "@/components/cashier/PettyCashModal";
+import { VoidPinModal } from "@/components/cashier/VoidPinModal";
+import { PaymentSuccessModal } from "@/components/cashier/PaymentSuccessModal";
 
 const playChime = (type: 'new_order' | 'order_ready') => {
   try {
@@ -70,23 +72,8 @@ export default function CashierPage() {
   const [incomingQrOrders, setIncomingQrOrders] = useState<Order[]>([]);
   const [waitingPaymentTableNos, setWaitingPaymentTableNos] = useState<Set<string>>(new Set());
 
-  // Manager PIN State
+  // Void Target State (Modal Logic & UI Handled by VoidPinModal component)
   const [voidItemTarget, setVoidItemTarget] = useState<{ orderId: string; itemId: string; delta: number } | null>(null);
-  const [managerPinInput, setManagerPinInput] = useState("");
-  const [managerPinError, setManagerPinError] = useState("");
-  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
-  const [pinAttempts, setPinAttempts] = useState(0);
-  const [pinLockTimer, setPinLockTimer] = useState(0);
-
-  useEffect(() => {
-    let interval: any = null;
-    if (pinLockTimer > 0) {
-      interval = setInterval(() => {
-        setPinLockTimer((prev) => (prev <= 1 ? (setPinAttempts(0), setManagerPinError(""), 0) : prev - 1));
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [pinLockTimer]);
 
   // Payment & Settlement State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -175,9 +162,8 @@ export default function CashierPage() {
     const pendingList: Order[] = [];
     currentOrders.forEach((o) => {
       const s = String(o.status || "").toLowerCase();
-      const m = String(o.payment_method || "").toLowerCase();
       const hasUnprintedItems = (o.items || []).some(i => i.kot_printed === false || i.kot_printed === undefined);
-      if ((s === "pending" || s === "reviewing" || hasUnprintedItems) && m !== "cashier" && m !== "staff" && s !== "completed") {
+      if (s !== "completed" && (s === "pending" || s === "reviewing" || hasUnprintedItems)) {
         pendingList.push(o);
       }
     });
@@ -195,6 +181,18 @@ export default function CashierPage() {
       const fetched = data as Order[];
       setOrders(fetched);
       updateIncomingQrList(fetched);
+
+      const waitingSet = new Set<string>();
+      fetched.forEach((ord: any) => {
+        const isDineIn = !ord.order_type || ord.order_type === "dine-in";
+        if (isDineIn && ord.table_no && ord.table_no !== "0") {
+          if (ord.is_bill_printed === true || String(ord.status || "").toLowerCase() === "waiting_payment") {
+            waitingSet.add(String(ord.table_no));
+          }
+        }
+      });
+      setWaitingPaymentTableNos(waitingSet);
+
       if (!selectedOrderId && fetched.length > 0) setSelectedOrderId(fetched[0].id);
     }
   }, [selectedOrderId, updateIncomingQrList]);
@@ -205,7 +203,7 @@ export default function CashierPage() {
       .channel("cashier_modular_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, async (payload) => {
         if (payload.eventType === "INSERT") {
-          const newOrder = payload.new as Order;
+          const newOrder = payload.new as any;
           if (newOrder.status?.toLowerCase() === "completed") return;
 
           const isDineIn = !newOrder.order_type || newOrder.order_type === "dine-in";
@@ -215,32 +213,76 @@ export default function CashierPage() {
             );
             if (existingActive) {
               const currentItems = existingActive.items || [];
-              const incomingItems = (newOrder.items || []).map((i) => ({ ...i, is_new: true, prepared: false, kot_printed: false, added_at: new Date().toISOString() }));
-              const combinedItems = [...currentItems, ...incomingItems];
+              const incomingItems = (newOrder.items || []).map((i: any) => ({
+                ...i,
+                is_new: true,
+                prepared: false,
+                kot_printed: false,
+                added_at: new Date().toISOString()
+              }));
+
+              const combinedItems = [...incomingItems, ...currentItems];
               const combinedTotal = Number(existingActive.total_amount || 0) + Number(newOrder.total_amount || 0);
 
               await supabase.from("orders").delete().eq("id", newOrder.id);
-              await supabase.from("orders").update({ items: combinedItems, total_amount: combinedTotal, status: "pending" }).eq("id", existingActive.id);
+
+              await supabase.from("orders").update({
+                items: combinedItems,
+                total_amount: combinedTotal,
+                status: "Preparing"
+              }).eq("id", existingActive.id);
+
+              setOrders(prev => {
+                const next = prev.map(o => o.id === existingActive.id ? { ...o, items: combinedItems, total_amount: combinedTotal, status: "Preparing" } : o);
+                updateIncomingQrList(next);
+                return next;
+              });
 
               playChime('new_order');
-              fetchOrders();
               return;
             }
           }
-          setOrders((prev) => [newOrder, ...prev.filter(o => o.id !== newOrder.id)]);
+          setOrders((prev) => {
+            const next = [newOrder as Order, ...prev.filter(o => o.id !== newOrder.id)];
+            updateIncomingQrList(next);
+            return next;
+          });
           setSelectedOrderId(newOrder.id);
           playChime('new_order');
         } else if (payload.eventType === "UPDATE") {
-          const updated = payload.new as Order;
+          const updated = payload.new as any;
           if (updated.status?.toLowerCase() === "completed") {
-            setOrders((prev) => prev.filter((o) => o.id !== updated.id));
+            setOrders((prev) => {
+              const next = prev.filter((o) => o.id !== updated.id);
+              updateIncomingQrList(next);
+              return next;
+            });
             setWaitingPaymentTableNos((prev) => { const next = new Set(prev); next.delete(String(updated.table_no)); return next; });
             setSelectedOrderId((prev) => prev === updated.id ? null : prev);
           } else {
-            setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+            setOrders((prev) => {
+              const next = prev.map((o) => (o.id === updated.id ? (updated as Order) : o));
+              updateIncomingQrList(next);
+              return next;
+            });
+
+            if (updated.table_no) {
+              if (updated.is_bill_printed === true || updated.status === "waiting_payment") {
+                setWaitingPaymentTableNos((prev) => new Set(prev).add(String(updated.table_no)));
+              }
+            }
+
+            const hasUnprinted = (updated.items || []).some((i: any) => i.kot_printed === false || i.kot_printed === undefined);
+            if (hasUnprinted) {
+              playChime('new_order');
+            }
           }
         } else if (payload.eventType === "DELETE") {
-          setOrders((prev) => prev.filter((o) => o.id !== payload.old.id));
+          setOrders((prev) => {
+            const next = prev.filter((o) => o.id !== payload.old.id);
+            updateIncomingQrList(next);
+            return next;
+          });
           setSelectedOrderId((prev) => prev === payload.old.id ? null : prev);
         }
       })
@@ -248,7 +290,7 @@ export default function CashierPage() {
 
     channelRef.current = channel;
     return () => { supabase.removeChannel(channel); };
-  }, [fetchOrders]);
+  }, [fetchOrders, updateIncomingQrList]);
 
   const selectedOrder: Order | null = orders.find(o => o.id === selectedOrderId) || null;
   const serviceChargePct = Number(settings?.service_charge_pct ?? 10);
@@ -297,15 +339,27 @@ export default function CashierPage() {
     return Math.max(0, selectedOrderSubtotal + selectedOrderServiceCharge + selectedOrderTax - calculatedDiscount);
   }, [selectedOrderSubtotal, selectedOrderServiceCharge, selectedOrderTax, calculatedDiscount]);
 
-  const handlePrintGuestBill = useCallback((order: Order) => {
+  const handlePrintGuestBill = useCallback(async (order: Order) => {
     const billPayload: Order = {
       ...order,
       discount: calculatedDiscount,
       total_amount: finalGrandTotal,
     };
     triggerSafePrint(billPayload, false);
-    if (order.table_no) {
+
+    if (order.table_no && order.table_no !== "0") {
       setWaitingPaymentTableNos((prev) => new Set(prev).add(String(order.table_no)));
+
+      if (order.id && order.id !== "DIRECT-STAGED") {
+        try {
+          await supabase
+            .from("orders")
+            .update({ is_bill_printed: true })
+            .eq("id", order.id);
+        } catch (e) {
+          console.error("Failed to persist bill printed state in DB", e);
+        }
+      }
     }
   }, [calculatedDiscount, finalGrandTotal, triggerSafePrint]);
 
@@ -326,9 +380,24 @@ export default function CashierPage() {
     const alreadyPrinted = totalItems.filter(i => i.kot_printed === true).map(i => ({ ...i, is_new: false }));
     const reorderedItems = [...newlyPrinted, ...alreadyPrinted];
 
-    await supabase.from("orders").update({ status: "Preparing", payment_method: "Cashier", items: reorderedItems }).eq("id", order.id);
-    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "Preparing", payment_method: "Cashier", items: reorderedItems } : o));
-    setIncomingQrOrders(prev => prev.filter(o => o.id !== order.id));
+    // Explicitly preserve order_type so Takeaway/Delivery labels are never lost.
+    await supabase.from("orders").update({
+      status: "Preparing",
+      payment_method: "Cashier",
+      items: reorderedItems,
+      order_type: order.order_type || "dine-in"
+    }).eq("id", order.id);
+    setOrders(prev => {
+      const next = prev.map(o => o.id === order.id ? {
+        ...o,
+        status: "Preparing",
+        payment_method: "Cashier",
+        items: reorderedItems,
+        order_type: order.order_type || "dine-in"
+      } : o);
+      updateIncomingQrList(next);
+      return next;
+    });
   };
 
   const handleSettlePayment = async (method: string, passedTendered?: string, passedChange?: number) => {
@@ -384,11 +453,16 @@ export default function CashierPage() {
           payment_method: method,
           total_amount: Number(finalGrandTotal),
           discount: Number(calculatedDiscount),
+          is_bill_printed: false,
           notes: (method === "Cash" || passedTendered) ? `[Paid Cash: ${tenderedAmt} | Change: ${changeAmt}] ${selectedOrder.notes || ''}`.trim() : selectedOrder.notes
         };
 
         await supabase.from("orders").update(updateData).eq("id", selectedOrder.id);
-        setOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
+        setOrders(prev => {
+          const next = prev.filter(o => o.id !== selectedOrder.id);
+          updateIncomingQrList(next);
+          return next;
+        });
         setWaitingPaymentTableNos((prev) => { const n = new Set(prev); n.delete(String(selectedOrder.table_no)); return n; });
 
         if (!isDineIn) {
@@ -421,45 +495,44 @@ export default function CashierPage() {
     }
   };
 
-  const handleVerifyManagerPinForVoid = async () => {
-    if (!managerPinInput || !voidItemTarget || pinLockTimer > 0) return;
-    setIsVerifyingPin(true);
-    const { data } = await supabase.from("restaurant_settings").select("admin_pin").limit(1).maybeSingle();
-    const expectedPin = data?.admin_pin ? String(data.admin_pin).trim() : "1234";
-
-    if (expectedPin !== managerPinInput.trim()) {
-      const nextAttempts = pinAttempts + 1;
-      setPinAttempts(nextAttempts);
-      if (nextAttempts >= 3) { setPinLockTimer(30); setManagerPinError("Locked 30s"); }
-      else { setManagerPinError(`Invalid PIN (${3 - nextAttempts} left)`); }
-      setIsVerifyingPin(false);
-      return;
-    }
-
-    const order = orders.find(o => o.id === voidItemTarget.orderId);
+  // Void execution callback after successful verification from VoidPinModal
+  const handleExecuteVoid = async () => {
+    if (!voidItemTarget) return;
+    const order = orders.find((o) => o.id === voidItemTarget.orderId);
     if (order) {
       let newItems = [...(order.items || [])];
-      if (voidItemTarget.delta === 0) newItems = newItems.filter(i => String(i.id) !== String(voidItemTarget.itemId));
-      else {
-        const idx = newItems.findIndex(i => String(i.id) === String(voidItemTarget.itemId));
+      if (voidItemTarget.delta === 0) {
+        newItems = newItems.filter((i) => String(i.id) !== String(voidItemTarget.itemId));
+      } else {
+        const idx = newItems.findIndex((i) => String(i.id) === String(voidItemTarget.itemId));
         if (idx !== -1) {
-          if (newItems[idx].quantity + voidItemTarget.delta <= 0) newItems.splice(idx, 1);
-          else newItems[idx].quantity += voidItemTarget.delta;
+          if (newItems[idx].quantity + voidItemTarget.delta <= 0) {
+            newItems.splice(idx, 1);
+          } else {
+            newItems[idx].quantity += voidItemTarget.delta;
+          }
         }
       }
+
       if (newItems.length === 0) {
         await supabase.from("orders").delete().eq("id", order.id);
-        setOrders(prev => prev.filter(o => o.id !== order.id));
+        setOrders((prev) => {
+          const next = prev.filter((o) => o.id !== order.id);
+          updateIncomingQrList(next);
+          return next;
+        });
         setSelectedOrderId(null);
       } else {
-        const sub = newItems.reduce((s, it) => s + (Number(it.price) * Number(it.quantity)), 0);
+        const sub = newItems.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
         await supabase.from("orders").update({ items: newItems, total_amount: sub }).eq("id", order.id);
-        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, items: newItems, total_amount: sub } : o));
+        setOrders((prev) => {
+          const next = prev.map((o) => (o.id === order.id ? { ...o, items: newItems, total_amount: sub } : o));
+          updateIncomingQrList(next);
+          return next;
+        });
       }
     }
     setVoidItemTarget(null);
-    setManagerPinInput("");
-    setIsVerifyingPin(false);
   };
 
   const receiptOrder: Order | null = useMemo(() => {
@@ -472,7 +545,6 @@ export default function CashierPage() {
     };
   }, [printOrderData, activeSettlementOrder, calculatedDiscount, finalGrandTotal]);
 
-  // Global Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -489,7 +561,15 @@ export default function CashierPage() {
         return;
       }
 
-      if (e.key === "F2") {
+      if (e.key === "F1") {
+        e.preventDefault();
+        if (activeSettlementOrder) {
+          const isDineIn = !activeSettlementOrder.order_type || activeSettlementOrder.order_type === "dine-in";
+          if (isDineIn) {
+            handlePrintGuestBill(activeSettlementOrder);
+          }
+        }
+      } else if (e.key === "F2") {
         e.preventDefault();
         if (activeSettlementOrder) {
           setPaymentModalMethod("Cash");
@@ -521,34 +601,43 @@ export default function CashierPage() {
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [activeSettlementOrder, finalGrandTotal, isPaymentModalOpen, isModalOpen, showRecentBills, isPettyCashModalOpen, showCustomDiscountModal, voidItemTarget, stagedDirectOrder]);
+  }, [activeSettlementOrder, finalGrandTotal, handlePrintGuestBill, isPaymentModalOpen, isModalOpen, showRecentBills, isPettyCashModalOpen, showCustomDiscountModal, voidItemTarget, stagedDirectOrder]);
 
   return (
     <ProtectedRoute>
       <div className="flex-1 flex flex-col font-sans overflow-hidden bg-slate-100 text-slate-900 pt-[64px] print:hidden">
 
-        {/* Global Standard Navbar: Rendered across all devices (Desktop and Mobile) */}
+        {/* Global Navbar */}
         <Navbar
           rightActions={
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-2">
               <button
                 onClick={async () => {
-                  const { data } = await supabase.from("orders").select("*").in("status", ["completed", "Completed"]).order("created_at", { ascending: false }).limit(6);
-                  if (data) { setRecentBills(data as Order[]); setShowRecentBills(true); }
+                  const { data } = await supabase
+                    .from("orders")
+                    .select("*")
+                    .in("status", ["completed", "Completed"])
+                    .order("created_at", { ascending: false })
+                    .limit(6);
+                  if (data) {
+                    setRecentBills(data as Order[]);
+                    setShowRecentBills(true);
+                  }
                 }}
-                className="flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-xl bg-white text-slate-700 border border-slate-200 text-xs font-bold hover:bg-slate-50 shadow-2xs cursor-pointer"
+                className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-orange-50/80 hover:bg-orange-100 text-orange-600 border border-orange-200/90 text-[11px] font-black uppercase tracking-wider transition-all shadow-2xs active:scale-95 cursor-pointer"
                 title="Recent Bills"
               >
-                <Clock className="w-3.5 h-3.5 text-orange-500" />
-                <span className="hidden sm:inline">Recent Bills</span>
+                <Clock className="w-3.5 h-3.5 text-orange-500 shrink-0 stroke-[2.5]" />
+                <span className="hidden sm:inline whitespace-nowrap">Recent Bills</span>
               </button>
+
               <button
                 onClick={() => setIsPettyCashModalOpen(true)}
-                className="flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold shadow-2xs cursor-pointer"
+                className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-rose-50/80 hover:bg-rose-100 text-rose-600 border border-rose-200/90 text-[11px] font-black uppercase tracking-wider transition-all shadow-2xs active:scale-95 cursor-pointer"
                 title="Log Outflow"
               >
-                <Receipt className="w-3.5 h-3.5 text-rose-500" />
-                <span className="hidden sm:inline">Log Outflow</span>
+                <Receipt className="w-3.5 h-3.5 text-rose-500 shrink-0 stroke-[2.5]" />
+                <span className="hidden sm:inline whitespace-nowrap">Log Outflow</span>
               </button>
             </div>
           }
@@ -562,48 +651,22 @@ export default function CashierPage() {
           </div>
         )}
 
-        {/* Manager PIN Modal */}
-        {voidItemTarget && (
-          <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 max-w-xs w-full">
-              <div className="flex justify-between items-center pb-3 border-b mb-3 text-rose-600 font-black text-sm">
-                <div className="flex items-center gap-1.5"><Lock className="w-4 h-4" /> Manager PIN</div>
-                <button onClick={() => setVoidItemTarget(null)}><X className="w-4 h-4 text-slate-400" /></button>
-              </div>
-              <input
-                type="password"
-                maxLength={6}
-                autoFocus
-                placeholder="••••"
-                value={managerPinInput}
-                onChange={(e) => setManagerPinInput(e.target.value)}
-                className="w-full border-2 rounded-2xl py-2.5 text-center text-2xl font-black mb-2 outline-none focus:border-rose-500"
-              />
-              {managerPinError && <p className="text-xs font-bold text-rose-500 text-center mb-2">{managerPinError}</p>}
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <button onClick={() => setVoidItemTarget(null)} className="py-2 bg-slate-100 rounded-xl text-xs font-bold cursor-pointer">Cancel</button>
-                <button onClick={handleVerifyManagerPinForVoid} disabled={isVerifyingPin} className="py-2 bg-rose-600 text-white rounded-xl text-xs font-bold cursor-pointer">Authorize</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Modular Modern Void PIN Modal */}
+        <VoidPinModal
+          isOpen={!!voidItemTarget}
+          onClose={() => setVoidItemTarget(null)}
+          onSuccess={handleExecuteVoid}
+        />
 
-        {/* Payment Success Modal */}
-        {showPaymentSuccess && lastSettledDetails && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowPaymentSuccess(false)}>
-            <div className="bg-white border rounded-[2rem] p-6 text-center max-w-sm w-full mx-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-              <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-                <CheckCircle className="w-8 h-8" />
-              </div>
-              <h3 className="text-lg font-black">Payment Completed!</h3>
-              <p className="text-xs text-slate-500">Table {lastSettledDetails.tableNo} · {currencySymbol} {lastSettledDetails.totalAmount.toLocaleString()}</p>
-            </div>
-          </div>
-        )}
+        {/* Modular Modern Animated Payment Success Modal */}
+        <PaymentSuccessModal
+          isOpen={showPaymentSuccess}
+          onClose={() => setShowPaymentSuccess(false)}
+          details={lastSettledDetails}
+          currencySymbol={currencySymbol}
+        />
 
-        {/* ========================================================================= */}
-        {/* DESKTOP VIEW: Exact 3-column layout (100% stable on Laptop & POS screens) */}
-        {/* ========================================================================= */}
+        {/* DESKTOP VIEW */}
         <div className="hidden min-[1024px]:grid grid-cols-12 gap-3 h-[calc(100vh-70px)] px-3 sm:px-4 py-2 overflow-hidden">
           <TablesGrid
             tables={tables}
@@ -617,31 +680,44 @@ export default function CashierPage() {
             onOpenManualModal={(typeStr) => { setManualModalType(typeStr); setActiveAddOnOrderId(null); setIsModalOpen(true); }}
           />
 
-          <div className="col-span-12 lg:col-span-5 xl:col-span-5 bg-white border border-slate-200 rounded-2xl flex flex-col shadow-2xs overflow-hidden h-full">
-            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-              <h2 className="font-black text-slate-900 text-xs sm:text-sm uppercase tracking-wider">LIVE ORDERS</h2>
-              {incomingQrOrders.length > 0 && (
-                <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse">
-                  {incomingQrOrders.length} QR Pending
-                </span>
-              )}
+          {/* Middle Column */}
+          <div className="col-span-12 lg:col-span-5 xl:col-span-5 flex flex-col gap-2.5 overflow-hidden h-full">
+
+            {/* Top Card: Incoming QR */}
+            <div className="bg-white border border-orange-300/70 rounded-3xl flex flex-col shadow-[0_0_25px_rgba(249,115,22,0.12)] overflow-hidden shrink-0 h-[43%] transition-all">
+              <div className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 flex justify-between items-center shrink-0 shadow-xs">
+                <h2 className="font-black text-white text-xs sm:text-sm uppercase tracking-wider drop-shadow-xs">
+                  LIVE ORDERS
+                </h2>
+                {incomingQrOrders.length > 0 && (
+                  <span className="bg-white text-orange-600 text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-sm animate-pulse">
+                    {incomingQrOrders.length} QR Pending
+                  </span>
+                )}
+              </div>
+
+              <div className="p-2 flex-1 min-h-0 overflow-y-auto no-scrollbar">
+                <IncomingQrQueue
+                  incomingQrOrders={incomingQrOrders}
+                  selectedOrderId={selectedOrderId}
+                  onReviewOrder={async (qrOrd) => {
+                    setSelectedOrderId(qrOrd.id);
+                    if (qrOrd.status !== 'reviewing') {
+                      await supabase.from("orders").update({ status: "reviewing" }).eq("id", qrOrd.id);
+                      setOrders(prev => {
+                        const next = prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o);
+                        updateIncomingQrList(next);
+                        return next;
+                      });
+                    }
+                  }}
+                  onAcceptKot={(qrOrd) => { handlePrintKOT(qrOrd); setSelectedOrderId(qrOrd.id); }}
+                />
+              </div>
             </div>
 
+            {/* Bottom Card: Current Selected Order Workspace */}
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <IncomingQrQueue
-                incomingQrOrders={incomingQrOrders}
-                selectedOrderId={selectedOrderId}
-                onReviewOrder={async (qrOrd) => {
-                  setSelectedOrderId(qrOrd.id);
-                  if (qrOrd.status !== 'reviewing') {
-                    await supabase.from("orders").update({ status: "reviewing" }).eq("id", qrOrd.id);
-                    setOrders(prev => prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o));
-                    setIncomingQrOrders(prev => prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o));
-                  }
-                }}
-                onAcceptKot={(qrOrd) => { handlePrintKOT(qrOrd); setSelectedOrderId(qrOrd.id); }}
-              />
-
               <LiveOrdersWorkspace
                 selectedOrder={selectedOrder}
                 incomingQrOrders={incomingQrOrders}
@@ -655,6 +731,7 @@ export default function CashierPage() {
                 onPrintKot={handlePrintKOT}
               />
             </div>
+
           </div>
 
           <SettlementPanel
@@ -678,12 +755,9 @@ export default function CashierPage() {
           />
         </div>
 
-        {/* ========================================================================= */}
-        {/* MOBILE VIEW (<1024px): Full Native Mobile POS App with Bottom Nav Pill */}
-        {/* ========================================================================= */}
+        {/* MOBILE VIEW (<1024px) */}
         <div className="min-[1024px]:hidden flex-1 flex flex-col overflow-hidden pb-16">
 
-          {/* TAB 1: TABLES GRID */}
           <div className={`flex-1 h-full overflow-hidden p-2.5 ${mobileTab === "tables" ? "block" : "hidden"}`}>
             <TablesGrid
               tables={tables}
@@ -702,19 +776,20 @@ export default function CashierPage() {
             />
           </div>
 
-          {/* TAB 2: LIVE ORDERS WORKSPACE */}
-          <div className={`flex-1 h-full overflow-hidden p-2.5 ${mobileTab === "live" ? "block" : "hidden"}`}>
-            <div className="bg-white border border-slate-200 rounded-3xl flex flex-col shadow-xs overflow-hidden h-full">
-              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-                <h2 className="font-black text-slate-900 text-xs uppercase tracking-wider">LIVE ORDERS</h2>
+          <div className={`flex-1 h-full overflow-hidden p-2.5 flex flex-col gap-2.5 ${mobileTab === "live" ? "flex" : "hidden"}`}>
+            <div className="bg-white border border-orange-300/70 rounded-3xl flex flex-col shadow-[0_0_25px_rgba(249,115,22,0.12)] overflow-hidden shrink-0 h-[43%]">
+              <div className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 flex justify-between items-center shrink-0 shadow-xs">
+                <h2 className="font-black text-white text-xs uppercase tracking-wider drop-shadow-xs">
+                  LIVE ORDERS
+                </h2>
                 {incomingQrOrders.length > 0 && (
-                  <span className="bg-orange-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full animate-pulse">
+                  <span className="bg-white text-orange-600 text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-sm animate-pulse">
                     {incomingQrOrders.length} QR Pending
                   </span>
                 )}
               </div>
 
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="p-2 flex-1 min-h-0 overflow-y-auto no-scrollbar">
                 <IncomingQrQueue
                   incomingQrOrders={incomingQrOrders}
                   selectedOrderId={selectedOrderId}
@@ -722,30 +797,34 @@ export default function CashierPage() {
                     setSelectedOrderId(qrOrd.id);
                     if (qrOrd.status !== 'reviewing') {
                       await supabase.from("orders").update({ status: "reviewing" }).eq("id", qrOrd.id);
-                      setOrders(prev => prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o));
-                      setIncomingQrOrders(prev => prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o));
+                      setOrders(prev => {
+                        const next = prev.map(o => o.id === qrOrd.id ? { ...o, status: "reviewing" } : o);
+                        updateIncomingQrList(next);
+                        return next;
+                      });
                     }
                   }}
                   onAcceptKot={(qrOrd) => { handlePrintKOT(qrOrd); setSelectedOrderId(qrOrd.id); }}
                 />
-
-                <LiveOrdersWorkspace
-                  selectedOrder={selectedOrder}
-                  incomingQrOrders={incomingQrOrders}
-                  onOpenVoidModal={(orderId, itemId, delta) => setVoidItemTarget({ orderId, itemId, delta })}
-                  onOpenAddItemModal={() => {
-                    if (!selectedOrder) return;
-                    setActiveAddOnOrderId(selectedOrder.id);
-                    setManualModalType(selectedOrder.order_type === 'dine-in' ? `dine-in-${selectedOrder.table_no}` : (selectedOrder.order_type || 'takeaway'));
-                    setIsModalOpen(true);
-                  }}
-                  onPrintKot={handlePrintKOT}
-                />
               </div>
+            </div>
+
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <LiveOrdersWorkspace
+                selectedOrder={selectedOrder}
+                incomingQrOrders={incomingQrOrders}
+                onOpenVoidModal={(orderId, itemId, delta) => setVoidItemTarget({ orderId, itemId, delta })}
+                onOpenAddItemModal={() => {
+                  if (!selectedOrder) return;
+                  setActiveAddOnOrderId(selectedOrder.id);
+                  setManualModalType(selectedOrder.order_type === 'dine-in' ? `dine-in-${selectedOrder.table_no}` : (selectedOrder.order_type || 'takeaway'));
+                  setIsModalOpen(true);
+                }}
+                onPrintKot={handlePrintKOT}
+              />
             </div>
           </div>
 
-          {/* TAB 3: SETTLEMENT PANEL */}
           <div className={`flex-1 h-full overflow-hidden p-2.5 ${mobileTab === "settle" ? "block" : "hidden"}`}>
             <SettlementPanel
               activeSettlementOrder={activeSettlementOrder}
@@ -770,13 +849,12 @@ export default function CashierPage() {
 
         </div>
 
-        {/* Modern App Bottom Navigation Bar for Mobile */}
+        {/* Mobile Navigation Bar */}
         <nav className="min-[1024px]:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 flex items-center justify-around z-40 shadow-xl">
           <button
             type="button"
             onClick={() => setMobileTab("tables")}
-            className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "tables" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"
-              }`}
+            className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "tables" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"}`}
           >
             <span className="text-lg leading-none">🪑</span>
             <span className="text-[10px] tracking-wider uppercase">Tables</span>
@@ -785,8 +863,7 @@ export default function CashierPage() {
           <button
             type="button"
             onClick={() => setMobileTab("live")}
-            className={`relative flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "live" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"
-              }`}
+            className={`relative flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "live" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"}`}
           >
             <span className="text-lg leading-none">🔥</span>
             <span className="text-[10px] tracking-wider uppercase">Live</span>
@@ -800,15 +877,14 @@ export default function CashierPage() {
           <button
             type="button"
             onClick={() => setMobileTab("settle")}
-            className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "settle" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"
-              }`}
+            className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${mobileTab === "settle" ? "text-orange-600 font-black scale-105" : "text-slate-400 font-bold"}`}
           >
             <span className="text-lg leading-none">💳</span>
             <span className="text-[10px] tracking-wider uppercase">Settle</span>
           </button>
         </nav>
 
-        {/* Modular Modals */}
+        {/* Manual Order Modal (Auto KOT & Direct Sync to Kitchen) */}
         <ManualOrderModal
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
@@ -817,7 +893,7 @@ export default function CashierPage() {
           serviceChargePct={serviceChargePct}
           taxPct={taxPct}
           initialOrderType={manualModalType}
-          initialCustomerName={selectedOrder?.customer_name || ""}
+          initialCustomerName={activeAddOnOrderId ? (selectedOrder?.customer_name || "") : ""}
           onSubmitOrder={async (isDirectSettle, payload) => {
             setIsSubmitting(true);
             try {
@@ -843,16 +919,54 @@ export default function CashierPage() {
                   const { data } = await supabase.from("orders").select("*").eq("table_no", payload.tableNumber).in("status", ["pending", "reviewing", "Preparing", "Ready"]).limit(1);
                   if (data && data.length > 0) existingActiveOrder = data[0] as Order;
                 }
+
                 if (existingActiveOrder) {
-                  const merged = [...(existingActiveOrder.items || []), ...payload.items.map(i => ({ ...i, is_new: true, prepared: false, kot_printed: false }))];
+                  const newItemsForKot = payload.items.map(i => ({
+                    ...i,
+                    is_new: true,
+                    prepared: false,
+                    kot_printed: true,
+                    added_at: new Date().toISOString()
+                  }));
+
+                  triggerSafePrint({
+                    ...existingActiveOrder,
+                    items: newItemsForKot,
+                    notes: `[RUNNING KOT (CASHIER ADD-ON)] ${payload.specialNotes || ''}`.trim()
+                  }, true);
+
+                  const merged = [...newItemsForKot, ...(existingActiveOrder.items || []).map(i => ({ ...i, is_new: false }))];
                   const newTotal = Number(existingActiveOrder.total_amount || 0) + Number(payload.cartTotal || 0);
-                  await supabase.from("orders").update({ items: merged, total_amount: newTotal, status: "Preparing" }).eq("id", existingActiveOrder.id);
-                  triggerSafePrint({ ...existingActiveOrder, items: payload.items, notes: `[RUNNING KOT (ADD-ON)] ${existingActiveOrder.notes || ''}`.trim() } as Order, true);
-                  await supabase.from("orders").update({ items: merged.map(i => ({ ...i, kot_printed: true })) }).eq("id", existingActiveOrder.id);
+
+                  await supabase
+                    .from("orders")
+                    .update({
+                      items: merged,
+                      total_amount: newTotal,
+                      status: "Preparing",
+                      // Explicitly preserve order_type so Takeaway/Delivery labels are never lost.
+                      order_type: existingActiveOrder.order_type || "dine-in"
+                    })
+                    .eq("id", existingActiveOrder.id);
+
+                  setOrders(prev => {
+                    const next = prev.map(o => o.id === existingActiveOrder!.id ? {
+                      ...o,
+                      items: merged,
+                      total_amount: newTotal,
+                      status: "Preparing",
+                      order_type: existingActiveOrder!.order_type || "dine-in"
+                    } : o);
+                    updateIncomingQrList(next);
+                    return next;
+                  });
+
+                  setSelectedOrderId(existingActiveOrder.id);
+                  playChime('new_order');
                 } else {
                   const { data } = await supabase.from("orders").insert([{
                     table_no: payload.tableNumber,
-                    items: payload.items,
+                    items: payload.items.map(i => ({ ...i, kot_printed: true })),
                     total_amount: payload.cartTotal,
                     status: "Preparing",
                     order_type: payload.type,
@@ -860,13 +974,12 @@ export default function CashierPage() {
                     payment_method: "Cashier",
                     notes: payload.specialNotes || ""
                   }]).select();
+
                   if (data && data[0]) {
                     triggerSafePrint(data[0] as Order, true);
-                    await supabase.from("orders").update({ items: (data[0].items || []).map((i: any) => ({ ...i, kot_printed: true })) }).eq("id", data[0].id);
                   }
                 }
                 setIsModalOpen(false);
-                fetchOrders();
               }
             } catch (err: any) { showError(err.message); }
             finally { setIsSubmitting(false); }
@@ -874,6 +987,7 @@ export default function CashierPage() {
           isSubmitting={isSubmitting}
         />
 
+        {/* Petty Cash Modal */}
         <PettyCashModal
           isOpen={isPettyCashModalOpen}
           onClose={() => setIsPettyCashModalOpen(false)}
@@ -933,7 +1047,11 @@ export default function CashierPage() {
                         const calcDiscount = discountType === 'percent' ? (selectedOrderSubtotal * v) / 100 : v;
                         const grandTotal = Math.max(0, selectedOrderSubtotal + selectedOrderServiceCharge + selectedOrderTax - calcDiscount);
 
-                        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, discount: calcDiscount, total_amount: grandTotal } : o));
+                        setOrders(prev => {
+                          const next = prev.map(o => o.id === selectedOrder.id ? { ...o, discount: calcDiscount, total_amount: grandTotal } : o);
+                          updateIncomingQrList(next);
+                          return next;
+                        });
 
                         await supabase.from("orders").update({
                           discount: calcDiscount,

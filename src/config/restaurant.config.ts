@@ -12,15 +12,15 @@ export interface MenuItem {
 }
 
 export const restaurantConfig = {
-  name: "The Grand Aroma",
-  tagline: "Authentic Taste & Quality Cafe",
+  name: "Restaurant POS",
+  tagline: "Smart POS",
   currency: "LKR",
   service_charge_pct: 10,
   tax_pct: 0,
   table_count: 20,
   manager_pin: "1234",
-  phone: "+94 77 123 4567",
-  address: "Colombo, Sri Lanka",
+  phone: "",
+  address: "",
   categories: ["Starters", "Mains", "Desserts", "Beverages"],
   menu: [
     {

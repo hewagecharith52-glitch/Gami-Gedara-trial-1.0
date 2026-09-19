@@ -18,14 +18,14 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
     onAcceptKot,
 }) => {
     return (
-        <div className="p-2.5 bg-slate-50/70 border-b border-slate-200 shrink-0 h-[38%] flex flex-col">
+        <div className="flex flex-col w-full">
             {/* Header Bar */}
-            <div className="flex items-center justify-between mb-2 px-0.5 shrink-0">
+            <div className="flex items-center justify-between mb-2 px-1 shrink-0">
                 <div className="flex items-center gap-1.5">
                     <BellRing
                         className={`w-3.5 h-3.5 ${incomingQrOrders.length > 0
-                                ? "text-orange-600 animate-bounce"
-                                : "text-slate-400"
+                            ? "text-orange-600 animate-bounce"
+                            : "text-slate-400"
                             }`}
                     />
                     <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider">
@@ -41,7 +41,7 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
 
             {/* Empty State */}
             {incomingQrOrders.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-3 text-center">
+                <div className="flex flex-col items-center justify-center text-slate-400 py-4 text-center">
                     <QrCode className="w-7 h-7 opacity-20 mb-1" />
                     <p className="font-bold text-[11px]">No pending QR orders</p>
                     <p className="text-[9px] text-slate-400">
@@ -50,28 +50,31 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
                 </div>
             ) : (
                 /* Order Cards List */
-                <div className="space-y-2 overflow-y-auto pr-1 no-scrollbar flex-1">
+                <div className="space-y-2 overflow-y-auto pr-1 no-scrollbar">
                     {incomingQrOrders.map((qrOrd) => {
                         const isBeingViewed = selectedOrderId === qrOrd.id;
-                        const hasUnprintedItems = (qrOrd.items || []).some(
+                        const items = qrOrd.items || [];
+                        const hasUnprintedItems = items.some(
                             (i) => i.kot_printed === false || i.kot_printed === undefined
                         );
+                        //  KOT         Add-on QR   
                         const isAddOnTicket =
-                            (qrOrd.items || []).some((i) => i.kot_printed === true) &&
-                            hasUnprintedItems;
+                            items.some((i) => i.kot_printed === true) && hasUnprintedItems;
 
                         return (
                             <div
                                 key={qrOrd.id}
-                                className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 shadow-2xs relative overflow-hidden ${isBeingViewed
+                                className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 shadow-2xs relative overflow-hidden ${isAddOnTicket
+                                    ? "bg-amber-50/80 border-amber-400 ring-2 ring-amber-400/30"
+                                    : isBeingViewed
                                         ? "bg-white border-orange-500 ring-2 ring-orange-500/20"
                                         : "bg-white hover:bg-slate-50 border-slate-200/90"
                                     }`}
                             >
                                 <div
-                                    className={`absolute left-0 inset-y-0 w-1 ${isAddOnTicket
-                                            ? "bg-amber-500 animate-pulse"
-                                            : "bg-orange-500"
+                                    className={`absolute left-0 inset-y-0 w-1.5 ${isAddOnTicket
+                                        ? "bg-amber-500 animate-pulse"
+                                        : "bg-orange-500"
                                         } rounded-l-2xl`}
                                 />
 
@@ -79,8 +82,8 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
                                     <div className="flex items-center gap-1.5 mb-1">
                                         <span
                                             className={`font-black text-xs px-2 py-0.5 rounded-md ${isAddOnTicket
-                                                    ? "bg-amber-500 text-white animate-pulse"
-                                                    : "bg-slate-900 text-white"
+                                                ? "bg-amber-500 text-white animate-pulse"
+                                                : "bg-slate-900 text-white"
                                                 }`}
                                         >
                                             {isAddOnTicket
@@ -99,7 +102,7 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
                                         )}
                                     </div>
                                     <p className="text-[11px] text-slate-700 truncate font-bold">
-                                        {(qrOrd.items || [])
+                                        {items
                                             .filter((it) =>
                                                 isAddOnTicket
                                                     ? it.kot_printed === false || it.kot_printed === undefined
@@ -107,10 +110,10 @@ export const IncomingQrQueue: React.FC<IncomingQrQueueProps> = ({
                                             )
                                             .map(
                                                 (it) =>
-                                                    `${it.quantity}x ${it.name.replace(
-                                                        /\s*\((Regular|Large)\)\s*/gi,
-                                                        ""
-                                                    )}`
+                                                    `${it.quantity}x ${it.name
+                                                        .replace(/\(Regular\)/gi, "")
+                                                        .replace(/\(Large\)/gi, "")
+                                                        .trim()}`
                                             )
                                             .join(", ")}
                                     </p>

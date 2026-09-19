@@ -27,7 +27,7 @@ export type Order = {
     table_no: string;
     items: OrderItem[];
     total_amount: number;
-    status: OrderStatus;
+    status: OrderStatus | string;
     order_type?: OrderType;
     customer_name?: string;
     payment_method?: string;
